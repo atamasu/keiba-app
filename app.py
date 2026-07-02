@@ -416,6 +416,50 @@ def api_races():
     return jsonify({"races": result, "total": len(result)})
 
 
+@app.route("/api/race_patterns")
+def api_race_patterns():
+    venue = request.args.get("venue")
+    days = request.args.get("days", type=int)
+    if not venue:
+        return jsonify({"error": "venue required"})
+
+    rows = load_all_data(venue=venue, days=days)
+    if not rows:
+        return jsonify({"patterns": {}, "venue": venue})
+
+    # レース番号ごとに人気別集計
+    from collections import defaultdict
+    race_nums = sorted(set(r['R'] for r in rows), key=lambda x: int(x))
+
+    patterns = {}
+    for rno in race_nums:
+        rrows = [r for r in rows if r['R'] == rno]
+        # このR番号の総レース数（日付ごとにカウント）
+        total_days = len(set(r['日付'] for r in rrows))
+        pop_count = defaultdict(int)
+        pop_pay = defaultdict(int)
+        for r in rrows:
+            pop_count[r['人気']] += 1
+            pop_pay[r['人気']] += r['配当円']
+
+        stats = []
+        for p in sorted(pop_count):
+            cnt = pop_count[p]
+            total_bet = total_days * 100
+            stats.append({
+                "人気": p,
+                "出現数": cnt,
+                "出現率": round(cnt / total_days * 100, 1) if total_days else 0,
+                "平均配当": round(pop_pay[p] / cnt),
+                "回収率": round(pop_pay[p] / total_bet * 100, 1) if total_bet else 0,
+                "total_days": total_days
+            })
+        stats.sort(key=lambda x: -x['出現率'])
+        patterns[rno] = stats
+
+    return jsonify({"patterns": patterns, "venue": venue})
+
+
 @app.route("/api/trend")
 def api_trend():
     days = request.args.get("days", 14, type=int)
