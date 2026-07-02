@@ -464,44 +464,20 @@
   <div id="tab-races" style="display:none">
     <!-- モード切替 -->
     <div class="tab-bar" style="margin-bottom:12px">
-      <div class="tab active" id="race-mode-pattern" onclick="selectRaceMode('pattern', this)">📊 R別分析</div>
-      <div class="tab" id="race-mode-list" onclick="selectRaceMode('list', this)">📋 一覧</div>
+      <div class="tab active" id="race-mode-pattern" onclick="selectRaceMode('pattern', this)">📊 出現率順</div>
+      <div class="tab" id="race-mode-roi" onclick="selectRaceMode('roi', this)">📈 回収率順</div>
     </div>
 
-    <!-- R別分析モード -->
-    <div id="race-panel-pattern">
-      <div class="period-bar">
-        <div class="period-btn" onclick="selectRacePeriod(7, this)">1週間</div>
-        <div class="period-btn active" onclick="selectRacePeriod(14, this)">2週間</div>
-        <div class="period-btn" onclick="selectRacePeriod(null, this)">全期間</div>
-      </div>
-      <div class="card">
-        <h2>競馬場を選択</h2>
-        <div class="venue-grid" id="pattern-venue-grid"></div>
-      </div>
-      <div id="pattern-area"><div class="loading-center">競馬場を選んでください</div></div>
+    <div class="period-bar">
+      <div class="period-btn" onclick="selectRacePeriod(7, this)">1週間</div>
+      <div class="period-btn active" onclick="selectRacePeriod(14, this)">2週間</div>
+      <div class="period-btn" onclick="selectRacePeriod(null, this)">全期間</div>
     </div>
-
-    <!-- 一覧モード -->
-    <div id="race-panel-list" style="display:none">
-      <div class="period-bar">
-        <div class="period-btn" onclick="selectRacePeriod('today', this)">今日</div>
-        <div class="period-btn active" onclick="selectRacePeriod(7, this)">1週間</div>
-        <div class="period-btn" onclick="selectRacePeriod(14, this)">2週間</div>
-        <div class="period-btn" onclick="selectRacePeriod(null, this)">全期間</div>
-      </div>
-      <div class="card">
-        <h2>人気帯で絞り込む</h2>
-        <div class="filter-row" id="pop-filter">
-          <div class="filter-btn active" onclick="selectPopFilter(null,null,this)">すべて</div>
-          <div class="filter-btn" onclick="selectPopFilter(1,3,this)">1〜3人気</div>
-          <div class="filter-btn" onclick="selectPopFilter(4,6,this)">4〜6人気</div>
-          <div class="filter-btn" onclick="selectPopFilter(7,9,this)">7〜9人気</div>
-          <div class="filter-btn" onclick="selectPopFilter(10,99,this)">10人気〜</div>
-        </div>
-      </div>
-      <div id="races-area"><div class="loading-center">読み込み中...</div></div>
+    <div class="card">
+      <h2>競馬場を選択</h2>
+      <div class="venue-grid" id="pattern-venue-grid"></div>
     </div>
+    <div id="pattern-area"><div class="loading-center">競馬場を選んでください</div></div>
   </div>
 
   <!-- 収集履歴タブ -->
@@ -986,10 +962,7 @@ function selectRaceMode(mode, el) {
   currentRaceMode = mode;
   document.querySelectorAll('#tab-races .tab-bar .tab').forEach(b => b.classList.remove('active'));
   el.classList.add('active');
-  document.getElementById('race-panel-pattern').style.display = mode === 'pattern' ? '' : 'none';
-  document.getElementById('race-panel-list').style.display = mode === 'list' ? '' : 'none';
-  if (mode === 'pattern' && !document.querySelector('#pattern-venue-grid .venue-btn')) loadPatternVenues();
-  if (mode === 'list') loadRaces();
+  if (currentPatternVenue) loadPatterns();
 }
 
 async function loadPatternVenues() {
@@ -1019,10 +992,16 @@ async function loadPatterns() {
   }
 
   const medals = ['🥇','🥈','🥉'];
+  const isRoiMode = currentRaceMode === 'roi';
+  const modeLabel = isRoiMode ? '回収率順（出現率15%以上）' : '出現率順';
+
   const cards = Object.entries(data.patterns).sort((a,b) => parseInt(a[0])-parseInt(b[0])).map(([rno, stats]) => {
     const total = stats[0]?.total_days || 0;
-    const top3 = stats.slice(0, 3);
-    const rows = top3.map((s, i) => {
+    let filtered = isRoiMode
+      ? stats.filter(s => s.出現率 >= 15).sort((a,b) => b.回収率 - a.回収率)
+      : stats.slice(0, 3);
+    if (!filtered.length) return '';
+    const rows = filtered.slice(0,3).map((s, i) => {
       const roiCls = s.回収率 >= 100 ? 'roi-color-plus' : s.回収率 >= 80 ? 'roi-color-good' : 'roi-color-low';
       return `<div class="summary-row" style="padding:10px 14px">
         <div style="font-size:16px;min-width:28px">${medals[i]||''}</div>
@@ -1038,22 +1017,21 @@ async function loadPatterns() {
       <h2>🏁 ${rno}R（${total}回開催分）</h2>
       <div class="summary-grid">${rows}</div>
     </div>`;
-  }).join('');
+  }).filter(Boolean).join('');
 
   area.innerHTML = `<div class="card" style="background:#eff6ff;border-color:#bfdbfe">
     <div style="font-size:13px;color:#1d4ed8;font-weight:700">
-      🏟 ${data.venue} — R別おすすめ人気（出現率順）
+      🏟 ${data.venue} — R別おすすめ人気（${modeLabel}）
     </div>
-  </div>${cards}`;
+  </div>${cards || '<div class="loading-center">条件に合うデータなし</div>'}`;
 }
 
 function selectRacePeriod(days, el) {
-  if (days === 'today') { currentRaceToday = true; currentRaceDays = null; }
-  else { currentRaceToday = false; currentRaceDays = days; }
+  currentRaceToday = false;
+  currentRaceDays = days;
   document.querySelectorAll('#tab-races .period-btn').forEach(b => b.classList.remove('active'));
   el.classList.add('active');
-  if (currentRaceMode === 'pattern') loadPatterns();
-  else loadRaces();
+  if (currentPatternVenue) loadPatterns();
 }
 
 function selectPopFilter(min, max, el) {
