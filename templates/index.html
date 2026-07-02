@@ -607,20 +607,27 @@ async function loadSummary() {
     </div>`;
   }).join('');
 
-  const venueHtml = data.by_venue.map(v => {
-    const r = v.top;
-    return `<div class="summary-row">
-      <div class="summary-label venue">🏟 ${v.venue}</div>
-      <div class="summary-pop">${r.人気}人気</div>
-      <div class="summary-detail">
-        平均 ${r.平均配当.toLocaleString()}円<br>出現率 ${r.出現率}%
-      </div>
-      <div style="text-align:right">
-        ${roiBadge(r.回収率)}
-        <div class="summary-races">${v.total_races}R</div>
-      </div>
-    </div>`;
-  }).join('');
+  const byROI = [...data.by_venue].sort((a,b) => b.top.回収率 - a.top.回収率);
+  const byRate = [...data.by_venue].sort((a,b) => b.top.出現率 - a.top.出現率);
+  const rankEmoji = ['🥇','🥈','🥉','4位','5位','6位','7位','8位','9位','10位'];
+
+  function venueRankHtml(list, key, suffix) {
+    return list.map((v, i) => {
+      const r = v.top;
+      const val = key === '回収率' ? r.回収率 + '%' : r.出現率 + '%';
+      const cls = key === '回収率' ? ROI_CLASS(r.回収率) : '';
+      return `<div class="summary-row" style="padding:10px 14px">
+        <div style="font-size:16px;min-width:34px">${rankEmoji[i]||''}</div>
+        <div class="summary-label venue" style="min-width:44px">🏟 ${v.venue}</div>
+        <div class="summary-pop" style="font-size:16px;min-width:54px">${r.人気}人気</div>
+        <div class="summary-detail" style="font-size:11px">${v.total_races}R</div>
+        <div style="text-align:right;font-size:20px;font-weight:900" class="${cls}">${val}</div>
+      </div>`;
+    }).join('');
+  }
+
+  const venueHtmlROI  = venueRankHtml(byROI, '回収率');
+  const venueHtmlRate = venueRankHtml(byRate, '出現率');
 
   const babaHtml = data.by_baba.map(b => {
     const r = b.top;
@@ -663,8 +670,14 @@ async function loadSummary() {
     </div>
     <div class="card">
       <div class="summary-section">
-        <h3>🏟 競馬場別おすすめ</h3>
-        <div class="summary-grid">${venueHtml || '<p style="color:#4a5a4a">データ不足</p>'}</div>
+        <h3>📈 競馬場別 回収率ランキング</h3>
+        <div class="summary-grid">${venueHtmlROI || '<p style="color:#4a5a4a">データ不足</p>'}</div>
+      </div>
+    </div>
+    <div class="card">
+      <div class="summary-section">
+        <h3>🎯 競馬場別 出現率ランキング</h3>
+        <div class="summary-grid">${venueHtmlRate || '<p style="color:#4a5a4a">データ不足</p>'}</div>
       </div>
     </div>
     <div class="card">
