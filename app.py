@@ -376,6 +376,46 @@ def api_collect_status():
     return jsonify({"date": target, **info})
 
 
+@app.route("/api/races")
+def api_races():
+    venue = request.args.get("venue")
+    days = request.args.get("days", type=int)
+    today_only = request.args.get("today") == "1"
+    min_pop = request.args.get("min_pop", type=int)
+    max_pop = request.args.get("max_pop", type=int)
+
+    rows = load_all_data(venue=venue or None, days=days, today_only=today_only)
+    if min_pop:
+        rows = [r for r in rows if r['人気'] >= min_pop]
+    if max_pop:
+        rows = [r for r in rows if r['人気'] <= max_pop]
+
+    # レース単位でグループ化
+    from collections import defaultdict
+    race_map = defaultdict(list)
+    for r in rows:
+        key = (r['日付'], r['競馬場'], r['R'])
+        race_map[key].append(r)
+
+    result = []
+    for (d, v, rno), rs in sorted(race_map.items(), key=lambda x: x[0], reverse=True):
+        for r in sorted(rs, key=lambda x: x['人気']):
+            pay = r['配当円']
+            result.append({
+                "日付": d,
+                "競馬場": v,
+                "R": rno,
+                "組み合わせ": r.get('組み合わせ', ''),
+                "人気": r['人気'],
+                "倍率": round(pay / 100, 1),
+                "配当円": pay,
+                "馬場状態": r.get('馬場状態', ''),
+                "天候": r.get('天候', ''),
+            })
+
+    return jsonify({"races": result, "total": len(result)})
+
+
 @app.route("/api/trend")
 def api_trend():
     days = request.args.get("days", 14, type=int)

@@ -365,6 +365,7 @@
     <div class="tab" onclick="showTab('summary')">🏆 おすすめ</div>
     <div class="tab" onclick="showTab('trend')">📈 トレンド</div>
     <div class="tab" onclick="showTab('analysis')">📊 詳細</div>
+    <div class="tab" onclick="showTab('races')">📑 レース</div>
     <div class="tab" onclick="showTab('history')">📋 履歴</div>
   </div>
 
@@ -459,6 +460,27 @@
     </div>
   </div>
 
+  <!-- レース一覧タブ -->
+  <div id="tab-races" style="display:none">
+    <div class="period-bar">
+      <div class="period-btn" onclick="selectRacePeriod('today', this)">今日</div>
+      <div class="period-btn active" onclick="selectRacePeriod(7, this)">1週間</div>
+      <div class="period-btn" onclick="selectRacePeriod(14, this)">2週間</div>
+      <div class="period-btn" onclick="selectRacePeriod(null, this)">全期間</div>
+    </div>
+    <div class="card">
+      <h2>人気帯で絞り込む</h2>
+      <div class="filter-row" id="pop-filter">
+        <div class="filter-btn active" onclick="selectPopFilter(null,null,this)">すべて</div>
+        <div class="filter-btn" onclick="selectPopFilter(1,3,this)">1〜3人気</div>
+        <div class="filter-btn" onclick="selectPopFilter(4,6,this)">4〜6人気</div>
+        <div class="filter-btn" onclick="selectPopFilter(7,9,this)">7〜9人気</div>
+        <div class="filter-btn" onclick="selectPopFilter(10,99,this)">10人気〜</div>
+      </div>
+    </div>
+    <div id="races-area"><div class="loading-center">読み込み中...</div></div>
+  </div>
+
   <!-- 収集履歴タブ -->
   <div id="tab-history" style="display:none">
     <div class="card">
@@ -471,6 +493,10 @@
 <script>
 let currentVenue = null;
 let currentBaba = null;
+let currentRaceDays = 7;
+let currentRaceToday = false;
+let currentMinPop = null;
+let currentMaxPop = null;
 let currentTenkou = null;
 let currentDays = 3;
 let currentAnalysisDays = null;
@@ -478,14 +504,15 @@ let currentToday = false;
 let collectPolling = null;
 
 function showTab(name) {
-  ['collect','summary','trend','analysis','history'].forEach(t => {
+  ['collect','summary','trend','analysis','races','history'].forEach(t => {
     document.getElementById('tab-'+t).style.display = t===name ? '' : 'none';
   });
   document.querySelectorAll('.tab').forEach((el,i) => {
-    el.classList.toggle('active', ['collect','summary','trend','analysis','history'][i] === name);
+    el.classList.toggle('active', ['collect','summary','trend','analysis','races','history'][i] === name);
   });
   if (name === 'summary') loadSummary();
   if (name === 'trend') loadTrend();
+  if (name === 'races') loadRaces();
   if (name === 'analysis' && document.querySelectorAll('#venue-grid .venue-btn').length <= 1) loadVenues();
   if (name === 'history') loadHistory();
   if (name === 'collect') loadRecent();
@@ -924,6 +951,83 @@ async function loadTrend() {
       </div>
     </div>`;
   }).join('');
+}
+
+// ── レース一覧 ────────────────────────────────
+function selectRacePeriod(days, el) {
+  if (days === 'today') { currentRaceToday = true; currentRaceDays = null; }
+  else { currentRaceToday = false; currentRaceDays = days; }
+  document.querySelectorAll('#tab-races .period-btn').forEach(b => b.classList.remove('active'));
+  el.classList.add('active');
+  loadRaces();
+}
+
+function selectPopFilter(min, max, el) {
+  currentMinPop = min; currentMaxPop = max;
+  document.querySelectorAll('#pop-filter .filter-btn').forEach(b => b.classList.remove('active'));
+  el.classList.add('active');
+  loadRaces();
+}
+
+const BABA_ICON2 = {'良':'🌿','稍重':'💧','重':'🌊','不良':'⛈'};
+
+async function loadRaces() {
+  const area = document.getElementById('races-area');
+  area.innerHTML = '<div class="loading-center"><div class="spinner" style="margin:0 auto 12px"></div><br>読み込み中...</div>';
+  const params = new URLSearchParams();
+  if (currentRaceToday) params.set('today', '1');
+  else if (currentRaceDays) params.set('days', currentRaceDays);
+  if (currentMinPop) params.set('min_pop', currentMinPop);
+  if (currentMaxPop) params.set('max_pop', currentMaxPop);
+  const data = await fetch('/api/races?' + params).then(r=>r.json()).catch(()=>null);
+  if (!data || !data.races.length) {
+    area.innerHTML = '<div class="loading-center">データなし</div>'; return;
+  }
+
+  // 人気ごとの回収率を算出（おすすめ判定用）
+  const popPay = {}, popCount = {};
+  data.races.forEach(r => {
+    popPay[r.人気] = (popPay[r.人気]||0) + r.配当円;
+    popCount[r.人気] = (popCount[r.人気]||0) + 1;
+  });
+  const recPops = new Set(
+    Object.keys(popPay).filter(p => (popPay[p] / (popCount[p] * 100) * 100) >= 100).map(Number)
+  );
+
+  const tableRows = data.races.map(r => {
+    const isRec = recPops.has(r.人気);
+    const roiCls = r.倍率 >= 10 ? 'roi-plus' : r.倍率 >= 5 ? 'roi-good' : '';
+    const recMark = isRec ? ' ★' : '';
+    const babaIcon = BABA_ICON2[r.馬場状態] || '';
+    return `<tr${isRec ? ' style="background:#f0fdf4"' : ''}>
+      <td style="font-size:11px;color:#8a9ab8">${r.日付.slice(5)}</td>
+      <td style="font-size:12px">${r.競馬場}</td>
+      <td style="text-align:center">${r.R}R</td>
+      <td style="text-align:center;font-weight:900;color:#0f2a6e">${r.人気}人気${recMark}</td>
+      <td style="text-align:right;font-weight:700" class="${roiCls}">${r.倍率}倍</td>
+      <td style="text-align:right;color:#4a6090">${r.配当円.toLocaleString()}円</td>
+      <td style="text-align:center;font-size:11px">${babaIcon}</td>
+    </tr>`;
+  }).join('');
+
+  area.innerHTML = `
+    <div class="card">
+      <h2>レース一覧（${data.total}件）— ★はおすすめ人気</h2>
+      <div style="overflow-x:auto">
+        <table>
+          <thead><tr>
+            <th style="text-align:left">日付</th>
+            <th style="text-align:left">場</th>
+            <th>R</th>
+            <th>人気</th>
+            <th>倍率</th>
+            <th>配当</th>
+            <th>馬場</th>
+          </tr></thead>
+          <tbody>${tableRows}</tbody>
+        </table>
+      </div>
+    </div>`;
 }
 
 // ── 収集履歴 ─────────────────────────────────
