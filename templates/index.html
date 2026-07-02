@@ -423,6 +423,12 @@
 
   <!-- 回収率分析タブ -->
   <div id="tab-analysis" style="display:none">
+    <div class="period-bar">
+      <div class="period-btn" onclick="selectAnalysisPeriod(3, this)">直近3日</div>
+      <div class="period-btn" onclick="selectAnalysisPeriod(7, this)">1週間</div>
+      <div class="period-btn" onclick="selectAnalysisPeriod(14, this)">2週間</div>
+      <div class="period-btn active" onclick="selectAnalysisPeriod(null, this)">全期間</div>
+    </div>
     <div class="card">
       <h2>競馬場を選択</h2>
       <div class="venue-grid" id="venue-grid">
@@ -467,6 +473,7 @@ let currentVenue = null;
 let currentBaba = null;
 let currentTenkou = null;
 let currentDays = 3;
+let currentAnalysisDays = null;
 let currentToday = false;
 let collectPolling = null;
 
@@ -695,6 +702,13 @@ async function loadSummary() {
 }
 
 // ── 回収率分析 ────────────────────────────────
+function selectAnalysisPeriod(days, el) {
+  currentAnalysisDays = days;
+  document.querySelectorAll('#tab-analysis .period-btn').forEach(b => b.classList.remove('active'));
+  el.classList.add('active');
+  loadStats();
+}
+
 function selectFilter(type, value, el) {
   if (type === 'baba') {
     currentBaba = value;
@@ -734,6 +748,7 @@ async function loadStats() {
   if (currentVenue) params.set('venue', currentVenue);
   if (currentBaba) params.set('baba', currentBaba);
   if (currentTenkou) params.set('tenkou', currentTenkou);
+  if (currentAnalysisDays) params.set('days', currentAnalysisDays);
   const url = '/api/stats' + (params.toString() ? '?' + params.toString() : '');
   const data = await fetch(url).then(r=>r.json()).catch(()=>null);
   if (!data || !data.stats.length) {
