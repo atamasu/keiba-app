@@ -1,0 +1,918 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>地方競馬 データ分析</title>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, 'Hiragino Sans', sans-serif;
+    background: #f0f4f8;
+    color: #1a2535;
+    min-height: 100vh;
+    background-image:
+      repeating-linear-gradient(
+        110deg,
+        transparent,
+        transparent 60px,
+        rgba(30,100,200,0.03) 60px,
+        rgba(30,100,200,0.03) 120px
+      );
+  }
+
+  /* ── ヘッダー ── */
+  header {
+    background: linear-gradient(135deg, #0f2a6e 0%, #1a3a8f 50%, #0a1f5c 100%);
+    border-bottom: 3px solid #3b82f6;
+    padding: 0 20px;
+    position: sticky; top: 0; z-index: 10;
+    display: flex; align-items: stretch;
+    box-shadow: 0 4px 20px rgba(15,42,110,0.4);
+  }
+  .header-stripe {
+    width: 8px;
+    background: repeating-linear-gradient(
+      to bottom,
+      #3b82f6 0px, #3b82f6 10px,
+      #ffffff 10px, #ffffff 20px
+    );
+    margin-right: 16px;
+    flex-shrink: 0;
+  }
+  .header-inner {
+    display: flex; align-items: center; gap: 14px;
+    padding: 14px 0;
+    flex: 1;
+  }
+  .header-horse { font-size: 28px; }
+  .header-text h1 {
+    font-size: 20px; font-weight: 900;
+    letter-spacing: 2px;
+    color: #ffffff;
+  }
+  .header-text p {
+    font-size: 10px; color: #93b4e8; letter-spacing: 3px;
+    text-transform: uppercase; margin-top: 2px;
+  }
+  .header-live {
+    margin-left: auto;
+    display: flex; align-items: center; gap: 6px;
+    font-size: 11px; color: #93b4e8;
+  }
+  .live-dot {
+    width: 7px; height: 7px; border-radius: 50%;
+    background: #60a5fa;
+    animation: pulse 2s ease-in-out infinite;
+  }
+  @keyframes pulse { 0%,100%{opacity:1;transform:scale(1)} 50%{opacity:0.5;transform:scale(1.3)} }
+
+  /* ── コンテナ ── */
+  .container { max-width: 900px; margin: 0 auto; padding: 20px 16px; }
+
+  /* ── タブバー ── */
+  .tab-bar {
+    display: flex; gap: 2px; margin-bottom: 20px;
+    background: #ffffff;
+    border-radius: 12px; padding: 4px;
+    border: 1px solid #dde3ef;
+    box-shadow: 0 2px 8px rgba(30,60,150,0.08);
+  }
+  .tab {
+    flex: 1; text-align: center; padding: 10px 4px;
+    border-radius: 9px; cursor: pointer;
+    font-size: 12px; font-weight: 700;
+    color: #8a9ab8; transition: all 0.2s;
+    letter-spacing: 0.5px;
+  }
+  .tab.active {
+    background: linear-gradient(135deg, #1d4ed8, #2563eb);
+    color: #fff; box-shadow: 0 2px 10px rgba(37,99,235,0.4);
+  }
+  .tab:hover:not(.active) { color: #2563eb; }
+
+  /* ── カード ── */
+  .card {
+    background: #ffffff;
+    border-radius: 14px; padding: 20px; margin-bottom: 16px;
+    border: 1px solid #dde3ef;
+    box-shadow: 0 2px 12px rgba(30,60,150,0.07);
+    position: relative; overflow: hidden;
+  }
+  .card::before {
+    content: '';
+    position: absolute; top: 0; left: 0; right: 0; height: 3px;
+    background: linear-gradient(90deg, #1d4ed8, #60a5fa, #1d4ed8);
+  }
+  .card h2 {
+    font-size: 11px; color: #8a9ab8;
+    margin-bottom: 16px; text-transform: uppercase; letter-spacing: 2px;
+    display: flex; align-items: center; gap: 8px;
+  }
+  .card h2::after {
+    content: ''; flex: 1; height: 1px;
+    background: linear-gradient(90deg, #dde3ef, transparent);
+  }
+
+  /* ── ボタン ── */
+  .btn {
+    display: flex; align-items: center; justify-content: center; gap: 10px;
+    width: 100%; padding: 16px; border: none; border-radius: 12px;
+    font-size: 15px; font-weight: 700; cursor: pointer; transition: all 0.2s;
+    margin-bottom: 10px; letter-spacing: 0.5px;
+  }
+  .btn:last-child { margin-bottom: 0; }
+  .btn-primary {
+    background: linear-gradient(135deg, #1d4ed8, #2563eb);
+    color: #fff;
+    box-shadow: 0 4px 14px rgba(37,99,235,0.4);
+  }
+  .btn-primary:hover { box-shadow: 0 6px 20px rgba(37,99,235,0.55); transform: translateY(-1px); }
+  .btn-secondary {
+    background: #f0f4ff;
+    color: #4a6090; border: 1px solid #dde3ef;
+  }
+  .btn-secondary:hover { background: #e4ecff; border-color: #93c5fd; }
+  .btn:disabled { opacity: 0.4; cursor: not-allowed; transform: none !important; }
+
+  /* ── ログボックス ── */
+  .log-box {
+    background: #f8faff; border-radius: 10px; padding: 14px; margin-top: 14px;
+    font-size: 13px; line-height: 1.9; max-height: 300px; overflow-y: auto;
+    display: none; font-family: 'Menlo', 'Monaco', monospace;
+    border: 1px solid #dde3ef;
+  }
+  .log-box.visible { display: block; }
+  .log-line { color: #6a7a9a; }
+  .log-line.ok { color: #16a34a; }
+  .log-line.skip { color: #9aa8c0; }
+  .log-line.err { color: #dc2626; }
+
+  /* ── 会場グリッド ── */
+  .venue-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(78px, 1fr)); gap: 8px; }
+  .venue-btn {
+    padding: 11px 6px; border-radius: 10px; text-align: center; cursor: pointer;
+    font-size: 13px; font-weight: 600; transition: all 0.2s;
+    color: #6a7a9a;
+    background: #f0f4ff;
+    border: 1px solid #dde3ef;
+  }
+  .venue-btn:hover { border-color: #93c5fd; color: #2563eb; background: #eff6ff; }
+  .venue-btn.active {
+    background: linear-gradient(135deg, #eff6ff, #dbeafe);
+    border-color: #2563eb; color: #1d4ed8; font-weight: 800;
+  }
+  .venue-btn.all-btn {
+    background: #fff0f0; border-color: #fca5a5; color: #dc2626; font-weight: 800;
+  }
+  .venue-btn.all-btn.active {
+    background: linear-gradient(135deg, #fee2e2, #fecaca);
+    border-color: #dc2626; color: #991b1b;
+  }
+
+  /* ── フィルターボタン ── */
+  .filter-row { display: flex; gap: 8px; flex-wrap: wrap; }
+  .filter-btn {
+    padding: 8px 18px; border-radius: 20px; cursor: pointer;
+    font-size: 13px; font-weight: 700; transition: all 0.2s;
+    background: #f0f4ff; color: #8a9ab8;
+    border: 1px solid #dde3ef;
+  }
+  .filter-btn:hover { border-color: #93c5fd; color: #2563eb; }
+  .filter-btn.active { color: #fff; }
+  #baba-filter .filter-btn:first-child.active,
+  #tenkou-filter .filter-btn:first-child.active { background: #2563eb; border-color: #2563eb; color: #fff; }
+  .filter-btn.active.baba-ryo  { background: #16a34a; border-color: #16a34a; }
+  .filter-btn.active.baba-yaya { background: #d97706; border-color: #d97706; }
+  .filter-btn.active.baba-omo  { background: #2563eb; border-color: #2563eb; }
+  .filter-btn.active.baba-furl { background: #dc2626; border-color: #dc2626; }
+  .filter-btn.active.tenkou-hare  { background: #d97706; border-color: #d97706; }
+  .filter-btn.active.tenkou-kumo  { background: #6b7280; border-color: #6b7280; }
+  .filter-btn.active.tenkou-ame   { background: #2563eb; border-color: #2563eb; }
+  .filter-btn.active.tenkou-koame { background: #3b82f6; border-color: #3b82f6; }
+
+  /* ── 期間ボタン ── */
+  .period-bar { display: flex; gap: 6px; margin-bottom: 20px; }
+  .period-btn {
+    flex: 1; text-align: center; padding: 10px 4px; border-radius: 10px;
+    cursor: pointer; font-size: 13px; font-weight: 700;
+    background: #fff; color: #8a9ab8;
+    border: 1px solid #dde3ef; transition: all 0.15s;
+  }
+  .period-btn.active {
+    background: linear-gradient(135deg, #1d4ed8, #2563eb);
+    color: #fff; border-color: #1d4ed8;
+    box-shadow: 0 2px 10px rgba(37,99,235,0.3);
+  }
+
+  /* ── サマリー ── */
+  .summary-section { margin-bottom: 0; }
+  .summary-section h3 {
+    font-size: 11px; color: #8a9ab8; margin-bottom: 12px;
+    text-transform: uppercase; letter-spacing: 2px;
+    display: flex; align-items: center; gap: 8px;
+  }
+  .summary-section h3::after {
+    content: ''; flex: 1; height: 1px;
+    background: linear-gradient(90deg, #dde3ef, transparent);
+  }
+  .summary-grid { display: flex; flex-direction: column; gap: 8px; }
+  .summary-row {
+    display: flex; align-items: center; gap: 12px;
+    background: #f8faff; border-radius: 12px; padding: 14px 16px;
+    border: 1px solid #e8eef8;
+    transition: all 0.15s;
+  }
+  .summary-row:hover { border-color: #93c5fd; background: #eff6ff; }
+  .summary-label { font-size: 13px; font-weight: 700; min-width: 64px; color: #4a6090; }
+  .summary-label.venue { min-width: 44px; }
+  .summary-pop { font-size: 22px; font-weight: 900; min-width: 60px; color: #0f2a6e; }
+  .summary-detail { flex: 1; font-size: 12px; color: #8a9ab8; line-height: 1.7; }
+  .summary-roi { font-size: 20px; font-weight: 900; white-space: nowrap; }
+  .summary-races { font-size: 11px; color: #b0bcd0; margin-top: 2px; }
+
+  /* ── おすすめカード ── */
+  .recommend-box {
+    background: #f8faff; border-radius: 12px; padding: 4px 0; margin-bottom: 16px;
+    border: 1px solid #e8eef8;
+  }
+  .rec-item {
+    display: flex; align-items: center; gap: 14px; padding: 14px 16px;
+    border-bottom: 1px solid #e8eef8;
+    transition: background 0.15s;
+  }
+  .rec-item:last-child { border-bottom: none; }
+  .rec-item:hover { background: #eff6ff; }
+  .rec-medal { font-size: 28px; min-width: 38px; text-align: center; }
+  .rec-pop { font-size: 22px; font-weight: 900; color: #0f2a6e; min-width: 64px; }
+  .rec-detail { flex: 1; }
+  .rec-detail .lbl { font-size: 11px; color: #b0bcd0; margin-bottom: 2px; letter-spacing: 0.5px; }
+  .rec-detail .val { font-size: 14px; font-weight: 700; color: #2a3550; }
+  .rec-roi-box { text-align: right; }
+  .rec-roi { font-size: 26px; font-weight: 900; }
+  .rec-roi-label { font-size: 11px; color: #8a9ab8; }
+
+  /* ── バッジ ── */
+  .badge {
+    display: inline-block; padding: 4px 10px; border-radius: 20px;
+    font-size: 11px; font-weight: 800; margin-top: 5px; letter-spacing: 0.5px;
+  }
+  .badge-green  { background: #dcfce7; color: #16a34a; border: 1px solid #bbf7d0; }
+  .badge-red    { background: #fee2e2; color: #dc2626; border: 1px solid #fecaca; }
+  .badge-yellow { background: #fef9c3; color: #d97706; border: 1px solid #fde68a; }
+
+  /* ── フィボナッチ ── */
+  .fib-box {
+    background: #f8faff; border-radius: 10px; padding: 14px; margin-bottom: 16px;
+    border: 1px solid #e8eef8;
+  }
+  .fib-title { font-size: 12px; color: #8a9ab8; margin-bottom: 10px; letter-spacing: 0.5px; }
+  .fib-steps { display: flex; gap: 5px; flex-wrap: wrap; align-items: center; }
+  .fib-step {
+    background: #fff; border: 1px solid #dde3ef;
+    border-radius: 6px; padding: 5px 12px; font-size: 13px; font-weight: 600; color: #4a6090;
+  }
+  .fib-step.first {
+    background: linear-gradient(135deg, #dbeafe, #eff6ff);
+    border-color: #93c5fd; color: #1d4ed8;
+  }
+  .arrow { color: #b0bcd0; font-size: 12px; }
+  .fib-note { font-size: 11px; color: #b0bcd0; margin-top: 8px; }
+
+  /* ── テーブル ── */
+  table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  th {
+    text-align: right; padding: 10px 12px;
+    color: #8a9ab8; border-bottom: 2px solid #e8eef8;
+    font-weight: 700; font-size: 11px; letter-spacing: 1px; text-transform: uppercase;
+  }
+  th:first-child { text-align: left; }
+  td { text-align: right; padding: 11px 12px; border-bottom: 1px solid #f0f4f8; color: #2a3550; }
+  td:first-child { text-align: left; font-weight: 700; }
+  tr:hover td { background: #f0f6ff; }
+  .roi-plus { color: #16a34a; font-weight: 900; }
+  .roi-good { color: #d97706; font-weight: 700; }
+  .roi-low  { color: #dc2626; }
+
+  /* ── 履歴・直近 ── */
+  .recent-list { display: flex; flex-direction: column; gap: 8px; }
+  .recent-item {
+    display: flex; align-items: center; gap: 14px;
+    background: #f8faff; border-radius: 10px; padding: 14px 16px;
+    border: 1px solid #e8eef8;
+    transition: all 0.15s;
+  }
+  .recent-item:hover { border-color: #93c5fd; background: #eff6ff; }
+  .recent-date { font-size: 14px; font-weight: 800; min-width: 96px; color: #1d4ed8; }
+  .recent-venues { font-size: 12px; color: #8a9ab8; flex: 1; }
+  .recent-count { font-size: 13px; color: #16a34a; white-space: nowrap; font-weight: 700; }
+
+  /* ── ローディング ── */
+  .spinner {
+    display: inline-block; width: 18px; height: 18px;
+    border: 2px solid rgba(37,99,235,0.2); border-top-color: #2563eb;
+    border-radius: 50%; animation: spin 0.7s linear infinite;
+  }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  .loading-center { text-align: center; padding: 40px; color: #b0bcd0; }
+
+  /* ── 回収率の色 ── */
+  .roi-color-plus { color: #16a34a; }
+  .roi-color-good { color: #d97706; }
+  .roi-color-low  { color: #dc2626; }
+
+  /* ── セクション区切り ── */
+  .section-gap { height: 16px; }
+
+  /* ── ステータスバー ── */
+  .status-bar { font-size: 12px; padding: 10px 14px; border-radius: 8px; margin-top: 10px; font-weight: 600; }
+  .status-running { background: #eff6ff; color: #2563eb; border: 1px solid #bfdbfe; }
+  .status-done    { background: #f0fdf4; color: #16a34a; border: 1px solid #bbf7d0; }
+  .status-error   { background: #fff1f2; color: #dc2626; border: 1px solid #fecaca; }
+
+  /* ── レースナンバー風装飾 ── */
+  .race-badge {
+    display: inline-flex; align-items: center; justify-content: center;
+    width: 32px; height: 32px; border-radius: 50%;
+    background: linear-gradient(135deg, #1d4ed8, #2563eb);
+    font-size: 12px; font-weight: 900;
+    color: #fff; flex-shrink: 0;
+  }
+</style>
+</head>
+<body>
+
+<header>
+  <div class="header-stripe"></div>
+  <div class="header-inner">
+    <div class="header-horse">🏇</div>
+    <div class="header-text">
+      <h1>地方競馬 データ分析</h1>
+      <p>Wide Bet Analytics · NAR</p>
+    </div>
+    <div class="header-live">
+      <div class="live-dot"></div>
+      LIVE DATA
+    </div>
+  </div>
+</header>
+
+<div class="container">
+  <div class="tab-bar">
+    <div class="tab active" onclick="showTab('collect')">📥 収集</div>
+    <div class="tab" onclick="showTab('summary')">🏆 おすすめ</div>
+    <div class="tab" onclick="showTab('trend')">📈 トレンド</div>
+    <div class="tab" onclick="showTab('analysis')">📊 詳細</div>
+    <div class="tab" onclick="showTab('history')">📋 履歴</div>
+  </div>
+
+  <!-- データ収集タブ -->
+  <div id="tab-collect">
+    <div class="card">
+      <h2>データ収集</h2>
+      <button class="btn btn-primary" id="btn-yesterday" onclick="startCollect('yesterday')">
+        📥 昨日のデータを回収する
+      </button>
+      <button class="btn btn-secondary" id="btn-today" onclick="startCollect('today')">
+        📅 本日のデータを回収する
+      </button>
+      <div id="collect-log" class="log-box"></div>
+    </div>
+    <div class="card">
+      <h2>収集済み直近10日</h2>
+      <div id="recent-list"><div class="loading-center">読み込み中...</div></div>
+    </div>
+  </div>
+
+  <!-- 総合おすすめタブ -->
+  <div id="tab-summary" style="display:none">
+    <div class="period-bar">
+      <div class="period-btn" onclick="selectPeriod('today', this)">今日</div>
+      <div class="period-btn active" onclick="selectPeriod(3, this)">直近3日</div>
+      <div class="period-btn" onclick="selectPeriod(7, this)">1週間</div>
+      <div class="period-btn" onclick="selectPeriod(14, this)">2週間</div>
+      <div class="period-btn" onclick="selectPeriod(null, this)">全期間</div>
+    </div>
+    <div id="summary-area"><div class="loading-center">読み込み中...</div></div>
+  </div>
+
+  <!-- トレンドタブ -->
+  <div id="tab-trend" style="display:none">
+    <div class="card">
+      <h2>期間</h2>
+      <div class="period-bar" style="margin-bottom:0">
+        <div class="period-btn" onclick="selectTrendDays(7, this)">1週間</div>
+        <div class="period-btn active" onclick="selectTrendDays(14, this)">2週間</div>
+        <div class="period-btn" onclick="selectTrendDays(30, this)">1ヶ月</div>
+      </div>
+    </div>
+    <div class="card">
+      <h2>人気別 回収率トレンド</h2>
+      <div style="position:relative;height:260px">
+        <canvas id="trend-chart"></canvas>
+      </div>
+      <div id="trend-legend" style="display:flex;flex-wrap:wrap;gap:10px;margin-top:14px;font-size:12px;font-weight:700"></div>
+    </div>
+    <div class="card">
+      <h2>直近の変化</h2>
+      <div id="trend-change-list"><div class="loading-center">読み込み中...</div></div>
+    </div>
+  </div>
+
+  <!-- 回収率分析タブ -->
+  <div id="tab-analysis" style="display:none">
+    <div class="card">
+      <h2>競馬場を選択</h2>
+      <div class="venue-grid" id="venue-grid">
+        <div class="venue-btn all-btn active" onclick="selectVenue(null, this)">全場</div>
+      </div>
+    </div>
+    <div class="card">
+      <h2>馬場状態で絞り込む</h2>
+      <div class="filter-row" id="baba-filter">
+        <div class="filter-btn active" onclick="selectFilter('baba', null, this)">すべて</div>
+        <div class="filter-btn baba-ryo"  onclick="selectFilter('baba', '良', this)">🌿 良</div>
+        <div class="filter-btn baba-yaya" onclick="selectFilter('baba', '稍重', this)">💧 稍重</div>
+        <div class="filter-btn baba-omo"  onclick="selectFilter('baba', '重', this)">🌊 重</div>
+        <div class="filter-btn baba-furl" onclick="selectFilter('baba', '不良', this)">⛈ 不良</div>
+      </div>
+      <div style="height:14px"></div>
+      <h2>天候で絞り込む</h2>
+      <div class="filter-row" id="tenkou-filter">
+        <div class="filter-btn active" onclick="selectFilter('tenkou', null, this)">すべて</div>
+        <div class="filter-btn tenkou-hare"  onclick="selectFilter('tenkou', '晴', this)">☀️ 晴</div>
+        <div class="filter-btn tenkou-kumo"  onclick="selectFilter('tenkou', '曇', this)">☁️ 曇</div>
+        <div class="filter-btn tenkou-ame"   onclick="selectFilter('tenkou', '雨', this)">🌧 雨</div>
+        <div class="filter-btn tenkou-koame" onclick="selectFilter('tenkou', '小雨', this)">🌦 小雨</div>
+      </div>
+    </div>
+    <div id="stats-area">
+      <div class="loading-center">読み込み中...</div>
+    </div>
+  </div>
+
+  <!-- 収集履歴タブ -->
+  <div id="tab-history" style="display:none">
+    <div class="card">
+      <h2>収集済みデータ一覧</h2>
+      <div id="history-list"><div class="loading-center">読み込み中...</div></div>
+    </div>
+  </div>
+</div>
+
+<script>
+let currentVenue = null;
+let currentBaba = null;
+let currentTenkou = null;
+let currentDays = 3;
+let currentToday = false;
+let collectPolling = null;
+
+function showTab(name) {
+  ['collect','summary','trend','analysis','history'].forEach(t => {
+    document.getElementById('tab-'+t).style.display = t===name ? '' : 'none';
+  });
+  document.querySelectorAll('.tab').forEach((el,i) => {
+    el.classList.toggle('active', ['collect','summary','trend','analysis','history'][i] === name);
+  });
+  if (name === 'summary') loadSummary();
+  if (name === 'trend') loadTrend();
+  if (name === 'analysis' && document.querySelectorAll('#venue-grid .venue-btn').length <= 1) loadVenues();
+  if (name === 'history') loadHistory();
+  if (name === 'collect') loadRecent();
+}
+
+// ── データ収集 ────────────────────────────────
+async function startCollect(when) {
+  const btnId = when === 'yesterday' ? 'btn-yesterday' : 'btn-today';
+  const btn = document.getElementById(btnId);
+  btn.disabled = true;
+  btn.innerHTML = '<div class="spinner"></div> 収集中...';
+
+  const logBox = document.getElementById('collect-log');
+  logBox.innerHTML = '';
+  logBox.classList.add('visible');
+
+  try {
+    const res = await fetch('/api/collect', {
+      method: 'POST',
+      headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({when})
+    });
+    const data = await res.json();
+    const targetDate = data.date;
+    if (collectPolling) clearInterval(collectPolling);
+    collectPolling = setInterval(() => pollCollect(targetDate, btn, btnId), 1500);
+  } catch(e) {
+    appendLog('❌ エラー: ' + e.message, 'err');
+    btn.disabled = false;
+    btn.innerHTML = when==='yesterday' ? '📥 昨日のデータを回収する' : '📅 本日のデータを回収する';
+  }
+}
+
+async function pollCollect(targetDate, btn, btnId) {
+  try {
+    const res = await fetch('/api/collect/status?date=' + targetDate);
+    const data = await res.json();
+    const logBox = document.getElementById('collect-log');
+    logBox.innerHTML = data.log.map(line => {
+      let cls = 'log-line';
+      if (line.startsWith('✅')) cls += ' ok';
+      else if (line.startsWith('⏭')) cls += ' skip';
+      else if (line.startsWith('❌')) cls += ' err';
+      return `<div class="${cls}">${line}</div>`;
+    }).join('');
+    logBox.scrollTop = logBox.scrollHeight;
+
+    if (data.status === 'done' || data.status === 'error') {
+      clearInterval(collectPolling);
+      btn.disabled = false;
+      const label = btnId === 'btn-yesterday' ? '📥 昨日のデータを回収する' : '📅 本日のデータを回収する';
+      btn.innerHTML = label;
+      if (data.status === 'done') loadRecent();
+    }
+  } catch(e) {}
+}
+
+function appendLog(msg, type='') {
+  const logBox = document.getElementById('collect-log');
+  logBox.innerHTML += `<div class="log-line ${type}">${msg}</div>`;
+  logBox.scrollTop = logBox.scrollHeight;
+}
+
+async function loadRecent() {
+  const el = document.getElementById('recent-list');
+  const data = await fetch('/api/recent').then(r=>r.json()).catch(()=>[]);
+  if (!data.length) { el.innerHTML = '<p style="color:#4a5a4a;padding:10px">データなし</p>'; return; }
+  el.innerHTML = '<div class="recent-list">' + data.map(d =>
+    `<div class="recent-item">
+      <div class="recent-date">${d.date}</div>
+      <div class="recent-venues">${d.venues.join('・')}</div>
+      <div class="recent-count">${d.venues.length}場</div>
+    </div>`
+  ).join('') + '</div>';
+}
+
+// ── 総合おすすめ ──────────────────────────────
+function selectPeriod(days, el) {
+  if (days === 'today') {
+    currentToday = true;
+    currentDays = null;
+  } else {
+    currentToday = false;
+    currentDays = days;
+  }
+  document.querySelectorAll('.period-btn').forEach(b => b.classList.remove('active'));
+  el.classList.add('active');
+  loadSummary();
+}
+
+const ROI_CLASS = roi => roi >= 110 ? 'roi-color-plus' : roi >= 90 ? 'roi-color-good' : 'roi-color-low';
+const BABA_ICON = {'良':'🌿','稍重':'💧','重':'🌊','不良':'⛈'};
+const TENKOU_ICON = {'晴':'☀️','曇':'☁️','雨':'🌧','小雨':'🌦'};
+
+function roiBadge(roi) {
+  if (roi >= 100) return `<span class="badge badge-green">▲ ${roi}%</span>`;
+  if (roi >= 85)  return `<span class="badge badge-yellow">${roi}%</span>`;
+  return `<span class="badge badge-red">▼ ${roi}%</span>`;
+}
+
+async function loadSummary() {
+  const area = document.getElementById('summary-area');
+  area.innerHTML = '<div class="loading-center"><div class="spinner" style="margin:0 auto 12px"></div><br>分析中...</div>';
+  const params = new URLSearchParams();
+  if (currentToday) params.set('today', '1');
+  else if (currentDays) params.set('days', currentDays);
+  const q = params.toString() ? '?' + params.toString() : '';
+  const data = await fetch('/api/summary' + q).then(r=>r.json()).catch(()=>null);
+  if (!data || data.error) { area.innerHTML = '<div class="loading-center">データ不足</div>'; return; }
+
+  const label = currentToday ? '今日' : (currentDays ? `直近${currentDays}日` : '全期間');
+
+  const overallHtml = data.overall.map((r, i) => {
+    const medals = ['🥇','🥈','🥉'];
+    return `<div class="summary-row">
+      <div class="summary-label">${medals[i]}</div>
+      <div class="summary-pop">${r.人気}人気</div>
+      <div class="summary-detail">
+        平均 ${r.平均配当.toLocaleString()}円（${(r.平均配当/100).toFixed(1)}倍）<br>
+        出現率 ${r.出現率}%
+      </div>
+      <div style="text-align:right">
+        <div class="summary-roi ${ROI_CLASS(r.回収率)}">${r.回収率}%</div>
+        <div class="summary-races">${data.total_races}R</div>
+      </div>
+    </div>`;
+  }).join('');
+
+  const venueHtml = data.by_venue.map(v => {
+    const r = v.top;
+    return `<div class="summary-row">
+      <div class="summary-label venue">🏟 ${v.venue}</div>
+      <div class="summary-pop">${r.人気}人気</div>
+      <div class="summary-detail">
+        平均 ${r.平均配当.toLocaleString()}円<br>出現率 ${r.出現率}%
+      </div>
+      <div style="text-align:right">
+        ${roiBadge(r.回収率)}
+        <div class="summary-races">${v.total_races}R</div>
+      </div>
+    </div>`;
+  }).join('');
+
+  const babaHtml = data.by_baba.map(b => {
+    const r = b.top;
+    const icon = BABA_ICON[b.baba] || '';
+    return `<div class="summary-row">
+      <div class="summary-label">${icon} ${b.baba}</div>
+      <div class="summary-pop">${r.人気}人気</div>
+      <div class="summary-detail">
+        平均 ${r.平均配当.toLocaleString()}円<br>出現率 ${r.出現率}%
+      </div>
+      <div style="text-align:right">
+        ${roiBadge(r.回収率)}
+        <div class="summary-races">${b.total_races}R</div>
+      </div>
+    </div>`;
+  }).join('');
+
+  const tenkouHtml = data.by_tenkou.map(t => {
+    const r = t.top;
+    const icon = TENKOU_ICON[t.tenkou] || '';
+    return `<div class="summary-row">
+      <div class="summary-label">${icon} ${t.tenkou}</div>
+      <div class="summary-pop">${r.人気}人気</div>
+      <div class="summary-detail">
+        平均 ${r.平均配当.toLocaleString()}円<br>出現率 ${r.出現率}%
+      </div>
+      <div style="text-align:right">
+        ${roiBadge(r.回収率)}
+        <div class="summary-races">${t.total_races}R</div>
+      </div>
+    </div>`;
+  }).join('');
+
+  area.innerHTML = `
+    <div class="card">
+      <div class="summary-section">
+        <h3>🏆 全体おすすめ（${label} / ${data.total_races}R）</h3>
+        <div class="summary-grid">${overallHtml}</div>
+      </div>
+    </div>
+    <div class="card">
+      <div class="summary-section">
+        <h3>🏟 競馬場別おすすめ</h3>
+        <div class="summary-grid">${venueHtml || '<p style="color:#4a5a4a">データ不足</p>'}</div>
+      </div>
+    </div>
+    <div class="card">
+      <div class="summary-section">
+        <h3>🌾 馬場状態別おすすめ</h3>
+        <div class="summary-grid">${babaHtml || '<p style="color:#4a5a4a">データ不足</p>'}</div>
+      </div>
+    </div>
+    <div class="card">
+      <div class="summary-section">
+        <h3>🌤 天候別おすすめ</h3>
+        <div class="summary-grid">${tenkouHtml || '<p style="color:#4a5a4a">データ不足</p>'}</div>
+      </div>
+    </div>`;
+}
+
+// ── 回収率分析 ────────────────────────────────
+function selectFilter(type, value, el) {
+  if (type === 'baba') {
+    currentBaba = value;
+    document.querySelectorAll('#baba-filter .filter-btn').forEach(b => b.classList.remove('active'));
+  } else {
+    currentTenkou = value;
+    document.querySelectorAll('#tenkou-filter .filter-btn').forEach(b => b.classList.remove('active'));
+  }
+  el.classList.add('active');
+  loadStats();
+}
+
+async function loadVenues() {
+  const venues = await fetch('/api/venues').then(r=>r.json()).catch(()=>[]);
+  const grid = document.getElementById('venue-grid');
+  venues.forEach(v => {
+    const el = document.createElement('div');
+    el.className = 'venue-btn';
+    el.textContent = v;
+    el.onclick = () => selectVenue(v, el);
+    grid.appendChild(el);
+  });
+  loadStats();
+}
+
+function selectVenue(venue, el) {
+  currentVenue = venue;
+  document.querySelectorAll('.venue-btn').forEach(b => b.classList.remove('active'));
+  el.classList.add('active');
+  loadStats();
+}
+
+async function loadStats() {
+  const area = document.getElementById('stats-area');
+  area.innerHTML = '<div class="loading-center"><div class="spinner" style="margin:0 auto 12px"></div><br>分析中...</div>';
+  const params = new URLSearchParams();
+  if (currentVenue) params.set('venue', currentVenue);
+  if (currentBaba) params.set('baba', currentBaba);
+  if (currentTenkou) params.set('tenkou', currentTenkou);
+  const url = '/api/stats' + (params.toString() ? '?' + params.toString() : '');
+  const data = await fetch(url).then(r=>r.json()).catch(()=>null);
+  if (!data || !data.stats.length) {
+    area.innerHTML = '<div class="loading-center">データなし</div>'; return;
+  }
+  const { stats, recommend, venue } = data;
+  const total = stats[0]?.total_races || 0;
+  const medals = ['🥇','🥈','🥉'];
+  const fib = [100, 200, 300, 500, 800, 1300, 2100];
+
+  const recHtml = recommend.map((r, i) => {
+    const roi = r.回収率;
+    const roiCls = roi >= 100 ? 'roi-color-plus' : roi >= 80 ? 'roi-color-good' : 'roi-color-low';
+    const badge = roi >= 100
+      ? '<span class="badge badge-green">▲ プラス収支</span>'
+      : roi >= 80
+        ? '<span class="badge badge-yellow">惜しい</span>'
+        : '<span class="badge badge-red">▼ マイナス</span>';
+    return `<div class="rec-item">
+      <div class="rec-medal">${medals[i]}</div>
+      <div class="rec-pop">${r.人気}人気</div>
+      <div class="rec-detail">
+        <div class="lbl">平均配当</div>
+        <div class="val">${r.平均配当.toLocaleString()}円（${(r.平均配当/100).toFixed(1)}倍）</div>
+        <div class="lbl" style="margin-top:5px">出現率</div>
+        <div class="val">${r.出現率}%（${r.出現数}回 / ${total}R）</div>
+      </div>
+      <div class="rec-roi-box">
+        <div class="rec-roi ${roiCls}">${roi}%</div>
+        <div class="rec-roi-label">回収率</div>
+        ${badge}
+      </div>
+    </div>`;
+  }).join('');
+
+  const fibSteps = fib.map((v,i) =>
+    `${i > 0 ? '<span class="arrow">→</span>' : ''}<div class="fib-step ${i===0?'first':''}">${v.toLocaleString()}円</div>`
+  ).join('');
+
+  const tableRows = stats.filter(s => s.人気 <= 20).map(s => {
+    const roi = s.回収率;
+    const cls = roi >= 100 ? 'roi-plus' : roi >= 80 ? 'roi-good' : 'roi-low';
+    const mark = roi >= 100 ? ' ★' : '';
+    return `<tr>
+      <td>${s.人気}人気</td>
+      <td>${s.出現率}%</td>
+      <td>${s.平均配当.toLocaleString()}円</td>
+      <td class="${cls}">${roi}%${mark}</td>
+    </tr>`;
+  }).join('');
+
+  area.innerHTML = `
+    <div class="card">
+      <h2>🏆 ${venue}のおすすめ（全${total}R分析）</h2>
+      <div class="recommend-box">${recHtml}</div>
+      <div class="fib-box">
+        <div class="fib-title">📐 フィボナッチ法 掛け金の目安（連敗時に増額）</div>
+        <div class="fib-steps">${fibSteps}</div>
+        <div class="fib-note">1勝ごとに100円にリセット。連敗7回で2,100円まで増加。</div>
+      </div>
+      <table>
+        <thead><tr><th>人気</th><th>出現率</th><th>平均配当</th><th>回収率</th></tr></thead>
+        <tbody>${tableRows}</tbody>
+      </table>
+    </div>`;
+}
+
+// ── トレンドグラフ ────────────────────────────
+let trendDays = 14;
+let trendChart = null;
+const TREND_COLORS = ['#1d4ed8','#16a34a','#d97706','#dc2626','#7c3aed'];
+
+function selectTrendDays(days, el) {
+  trendDays = days;
+  document.querySelectorAll('#tab-trend .period-btn').forEach(b => b.classList.remove('active'));
+  el.classList.add('active');
+  loadTrend();
+}
+
+async function loadTrend() {
+  const data = await fetch(`/api/trend?days=${trendDays}`).then(r=>r.json()).catch(()=>null);
+  if (!data || !data.dates.length) {
+    document.getElementById('trend-change-list').innerHTML = '<div class="loading-center">データ不足</div>';
+    return;
+  }
+
+  const labels = data.dates.map(d => d.slice(5)); // MM-DD
+  const datasets = data.pops.map((pop, i) => {
+    const series = data.series[pop] || [];
+    const roiMap = {};
+    series.forEach(s => { roiMap[s.date] = s.roi; });
+    return {
+      label: `${pop}人気`,
+      data: data.dates.map(d => roiMap[d] ?? null),
+      borderColor: TREND_COLORS[i % TREND_COLORS.length],
+      backgroundColor: TREND_COLORS[i % TREND_COLORS.length] + '22',
+      borderWidth: 2.5,
+      pointRadius: 4,
+      pointHoverRadius: 6,
+      tension: 0.35,
+      spanGaps: true,
+    };
+  });
+
+  const ctx = document.getElementById('trend-chart').getContext('2d');
+  if (trendChart) trendChart.destroy();
+  trendChart = new Chart(ctx, {
+    type: 'line',
+    data: { labels, datasets },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      interaction: { mode: 'index', intersect: false },
+      plugins: {
+        legend: { display: false },
+        tooltip: {
+          callbacks: {
+            label: ctx => ` ${ctx.dataset.label}: ${ctx.parsed.y !== null ? ctx.parsed.y + '%' : '-'}`
+          }
+        }
+      },
+      scales: {
+        x: {
+          grid: { color: '#e8eef8' },
+          ticks: { color: '#8a9ab8', font: { size: 11 } }
+        },
+        y: {
+          grid: { color: '#e8eef8' },
+          ticks: { color: '#8a9ab8', font: { size: 11 }, callback: v => v + '%' },
+          suggestedMin: 0,
+          suggestedMax: 200,
+        }
+      }
+    }
+  });
+
+  // 凡例
+  const legend = document.getElementById('trend-legend');
+  legend.innerHTML = data.pops.map((pop, i) =>
+    `<div style="display:flex;align-items:center;gap:5px">
+      <div style="width:18px;height:4px;border-radius:2px;background:${TREND_COLORS[i % TREND_COLORS.length]}"></div>
+      <span style="color:#4a6090">${pop}人気</span>
+    </div>`
+  ).join('');
+
+  // 直近変化リスト（最新日と3日前を比較）
+  const changeList = document.getElementById('trend-change-list');
+  if (data.dates.length < 2) { changeList.innerHTML = '<div class="loading-center">データ不足</div>'; return; }
+  const lastDate = data.dates[data.dates.length - 1];
+  const prevDate = data.dates[Math.max(0, data.dates.length - 4)];
+  const rows = data.pops.map(pop => {
+    const series = data.series[pop] || [];
+    const last = series.find(s => s.date === lastDate);
+    const prev = series.find(s => s.date === prevDate);
+    const lastRoi = last?.roi ?? null;
+    const prevRoi = prev?.roi ?? null;
+    const diff = (lastRoi !== null && prevRoi !== null) ? Math.round((lastRoi - prevRoi) * 10) / 10 : null;
+    return { pop, lastRoi, prevRoi, diff };
+  }).filter(r => r.lastRoi !== null);
+  rows.sort((a, b) => (b.lastRoi || 0) - (a.lastRoi || 0));
+
+  changeList.innerHTML = rows.map(r => {
+    const roiCls = r.lastRoi >= 100 ? 'roi-color-plus' : r.lastRoi >= 80 ? 'roi-color-good' : 'roi-color-low';
+    const diffStr = r.diff !== null
+      ? `<span style="font-size:12px;color:${r.diff >= 0 ? '#16a34a' : '#dc2626'}">${r.diff >= 0 ? '▲' : '▼'}${Math.abs(r.diff)}%</span>`
+      : '';
+    return `<div class="summary-row">
+      <div class="summary-pop">${r.pop}人気</div>
+      <div class="summary-detail">直近${trendDays}日 最新値</div>
+      <div style="text-align:right">
+        <div class="summary-roi ${roiCls}">${r.lastRoi}%</div>
+        ${diffStr}
+      </div>
+    </div>`;
+  }).join('');
+}
+
+// ── 収集履歴 ─────────────────────────────────
+async function loadHistory() {
+  const el = document.getElementById('history-list');
+  const data = await fetch('/api/recent').then(r=>r.json()).catch(()=>[]);
+  if (!data.length) { el.innerHTML = '<p style="color:#4a5a4a">データなし</p>'; return; }
+  el.innerHTML = '<div class="recent-list">' + data.map(d =>
+    `<div class="recent-item">
+      <div class="recent-date">${d.date}</div>
+      <div class="recent-venues">${d.venues.join(' / ')}</div>
+      <div class="recent-count">${d.venues.length}場</div>
+    </div>`
+  ).join('') + '</div>';
+}
+
+loadRecent();
+</script>
+</body>
+</html>

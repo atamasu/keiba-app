@@ -1,0 +1,6 @@
+__pycache__/
+*.pyc
+.env
+*.csv
+地方競馬まとめ/
+.DS_Store
