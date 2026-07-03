@@ -84,7 +84,7 @@ def calc_stats(rows):
 
 def recommend(stats):
     filtered = [s for s in stats if s['回収率'] >= 100 and s['人気'] <= 20 and s['出現数'] >= 2]
-    return sorted(filtered, key=lambda x: (-x['回収率'], x['人気']))[:3]
+    return sorted(filtered, key=lambda x: (-x['回収率'], x['人気']))[:8]
 
 
 # ── スクレイピング ────────────────────────────────────
@@ -365,7 +365,12 @@ def api_stats():
     baba = request.args.get("baba")
     tenkou = request.args.get("tenkou")
     days = request.args.get("days", type=int)
-    rows = load_all_data(venue=venue or None, days=days)
+    today_only = request.args.get("today") == "1"
+    meetings = request.args.get("meetings", type=int)
+    rows = load_all_data(venue=venue or None, days=days, today_only=today_only)
+    if meetings:
+        dates = sorted(set(r['日付'] for r in rows), reverse=True)[:meetings]
+        rows = [r for r in rows if r['日付'] in set(dates)]
     if baba:
         rows = [r for r in rows if r.get('馬場状態') == baba]
     if tenkou:

@@ -398,6 +398,12 @@
       </div>
       <button onclick="refreshToday(this)" style="flex-shrink:0;padding:10px 14px;border-radius:10px;background:linear-gradient(135deg,#1d4ed8,#2563eb);color:#fff;border:none;font-size:13px;font-weight:700;cursor:pointer">🔄</button>
     </div>
+    <div class="card" style="padding:14px;margin-bottom:12px">
+      <h2>競馬場を選択</h2>
+      <div class="venue-grid" id="summary-venue-grid">
+        <div class="venue-btn all-btn active" onclick="selectSummaryVenue(null, this)">全場</div>
+      </div>
+    </div>
     <div id="last-updated" style="text-align:right;font-size:11px;color:#b0bcd0;margin-bottom:8px"></div>
     <div id="summary-area"><div class="loading-center">読み込み中...</div></div>
   </div>
@@ -483,6 +489,7 @@ let currentToday = false;
 let collectPolling = null;
 let currentFieldSize = null;
 let todayLiveInterval = null;
+let currentSummaryVenue = null;
 
 function showTab(name) {
   ['collect','summary','analysis','races','history'].forEach(t => {
@@ -491,7 +498,10 @@ function showTab(name) {
   document.querySelectorAll('.tab').forEach((el,i) => {
     el.classList.toggle('active', ['collect','summary','analysis','races','history'][i] === name);
   });
-  if (name === 'summary') loadSummary();
+  if (name === 'summary') {
+    if (document.querySelectorAll('#summary-venue-grid .venue-btn').length <= 1) loadSummaryVenues();
+    else loadSummary();
+  }
   if (name === 'races') {
     if (!document.querySelector('#pattern-venue-grid .venue-btn')) loadPatternVenues();
   }
@@ -650,6 +660,26 @@ function selectPeriod(days, el) {
   loadSummary();
 }
 
+async function loadSummaryVenues() {
+  const venues = await fetch(API+'/api/venues').then(r=>r.json()).catch(()=>[]);
+  const grid = document.getElementById('summary-venue-grid');
+  venues.forEach(v => {
+    const el = document.createElement('div');
+    el.className = 'venue-btn';
+    el.textContent = v;
+    el.onclick = () => selectSummaryVenue(v, el);
+    grid.appendChild(el);
+  });
+  loadSummary();
+}
+
+function selectSummaryVenue(venue, el) {
+  currentSummaryVenue = venue;
+  document.querySelectorAll('#summary-venue-grid .venue-btn').forEach(b => b.classList.remove('active'));
+  el.classList.add('active');
+  loadSummary();
+}
+
 const ROI_CLASS = roi => roi >= 110 ? 'roi-color-plus' : roi >= 90 ? 'roi-color-good' : 'roi-color-low';
 const BABA_ICON = {'良':'🌿','稍重':'💧','重':'🌊','不良':'⛈'};
 const TENKOU_ICON = {'晴':'☀️','曇':'☁️','雨':'🌧','小雨':'🌦'};
@@ -676,47 +706,83 @@ async function refreshToday(btn) {
   loadSummary();
 }
 
+function buildOverallRows(recs, totalRaces) {
+  const rankLabels = ['🥇','🥈','🥉','4位','5位','6位','7位','8位'];
+  return recs.map((r, i) => `<div class="summary-row">
+    <div class="summary-label">${rankLabels[i]||''}</div>
+    <div class="summary-pop">${r.人気}人気</div>
+    <div class="summary-detail">
+      平均 ${r.平均配当.toLocaleString()}円（${(r.平均配当/100).toFixed(1)}倍）<br>
+      出現率 ${r.出現率}%
+    </div>
+    <div style="text-align:right">
+      <div class="summary-roi ${ROI_CLASS(r.回収率)}">${r.回収率}%</div>
+      <div class="summary-races">${totalRaces}R</div>
+    </div>
+  </div>`).join('');
+}
+
 async function loadSummary() {
   const area = document.getElementById('summary-area');
   area.innerHTML = '<div class="loading-center"><div class="spinner" style="margin:0 auto 12px"></div><br>分析中...</div>';
+
   const params = new URLSearchParams();
   if (currentToday) params.set('today', '1');
   else if (currentDays === 'meetings3') params.set('meetings', '3');
   else if (currentDays) params.set('days', currentDays);
-  const q = params.toString() ? '?' + params.toString() : '';
-  const data = await fetch(API+'/api/summary' + q).then(r=>r.json()).catch(()=>null);
+
+  const venueParams = currentSummaryVenue ? (() => {
+    const p = new URLSearchParams(params);
+    p.set('venue', currentSummaryVenue);
+    return p;
+  })() : null;
+
+  const [data, venueData] = await Promise.all([
+    fetch(API+'/api/summary?' + params.toString()).then(r=>r.json()).catch(()=>null),
+    venueParams
+      ? fetch(API+'/api/stats?' + venueParams.toString()).then(r=>r.json()).catch(()=>null)
+      : Promise.resolve(null)
+  ]);
+
   if (!data || data.error) { area.innerHTML = '<div class="loading-center">データ不足</div>'; return; }
   const lu = document.getElementById('last-updated');
   if (lu) { const now = new Date(); lu.textContent = `最終更新: ${now.getHours()}:${String(now.getMinutes()).padStart(2,'0')}`; }
 
   const label = currentToday ? '今日' : (currentDays === 'meetings3' ? '直近3回' : currentDays ? `直近${currentDays}日` : '全期間');
 
-  const overallHtml = data.overall.map((r, i) => {
-    const medals = ['🥇','🥈','🥉'];
-    return `<div class="summary-row">
-      <div class="summary-label">${medals[i]}</div>
-      <div class="summary-pop">${r.人気}人気</div>
-      <div class="summary-detail">
-        平均 ${r.平均配当.toLocaleString()}円（${(r.平均配当/100).toFixed(1)}倍）<br>
-        出現率 ${r.出現率}%
-      </div>
-      <div style="text-align:right">
-        <div class="summary-roi ${ROI_CLASS(r.回収率)}">${r.回収率}%</div>
-        <div class="summary-races">${data.total_races}R</div>
+  const overallHtml = buildOverallRows(data.overall, data.total_races);
+
+  // 選択競馬場セクション
+  let venueCardHtml = '';
+  if (venueData && venueData.recommend && venueData.recommend.length) {
+    const vTotal = venueData.stats[0]?.total_races || 0;
+    const vRows = buildOverallRows(venueData.recommend, vTotal);
+    venueCardHtml = `<div class="card" style="border-color:#bfdbfe">
+      <div class="summary-section">
+        <h3>🏟 ${currentSummaryVenue}のおすすめ（${label} / ${vTotal}R）</h3>
+        <div class="summary-grid">${vRows}</div>
       </div>
     </div>`;
-  }).join('');
+  } else if (venueData) {
+    venueCardHtml = `<div class="card" style="border-color:#bfdbfe">
+      <div class="summary-section">
+        <h3>🏟 ${currentSummaryVenue}のおすすめ（${label}）</h3>
+        <p style="color:#8a9ab8;font-size:13px;padding:8px 0">回収率100%超のデータがまだありません</p>
+      </div>
+    </div>`;
+  }
 
   const byROI = [...data.by_venue].sort((a,b) => b.top.回収率 - a.top.回収率);
   const byRate = [...data.by_venue].sort((a,b) => b.top.出現率 - a.top.出現率);
   const rankEmoji = ['🥇','🥈','🥉','4位','5位','6位','7位','8位','9位','10位'];
 
-  function venueRankHtml(list, key, suffix) {
+  function venueRankHtml(list, key) {
     return list.map((v, i) => {
       const r = v.top;
       const val = key === '回収率' ? r.回収率 + '%' : r.出現率 + '%';
       const cls = key === '回収率' ? ROI_CLASS(r.回収率) : '';
-      return `<div class="summary-row" style="padding:10px 14px">
+      const isSelected = v.venue === currentSummaryVenue;
+      return `<div class="summary-row" style="padding:10px 14px${isSelected?' border:1px solid #3b82f6;border-radius:10px':''}">
         <div style="font-size:16px;min-width:34px">${rankEmoji[i]||''}</div>
         <div class="summary-label venue" style="min-width:44px">🏟 ${v.venue}</div>
         <div class="summary-pop" style="font-size:16px;min-width:54px">${r.人気}人気</div>
@@ -726,26 +792,24 @@ async function loadSummary() {
     }).join('');
   }
 
-  const venueHtmlROI  = venueRankHtml(byROI, '回収率');
-  const venueHtmlRate = venueRankHtml(byRate, '出現率');
-
   area.innerHTML = `
     <div class="card">
       <div class="summary-section">
         <h3>🏆 全体おすすめ（${label} / ${data.total_races}R）</h3>
-        <div class="summary-grid">${overallHtml}</div>
+        <div class="summary-grid">${overallHtml || '<p style="color:#8a9ab8;font-size:13px;padding:8px 0">回収率100%超のデータがまだありません</p>'}</div>
       </div>
     </div>
+    ${venueCardHtml}
     <div class="card">
       <div class="summary-section">
         <h3>📈 競馬場別 回収率ランキング</h3>
-        <div class="summary-grid">${venueHtmlROI || '<p style="color:#4a5a4a">データ不足</p>'}</div>
+        <div class="summary-grid">${venueRankHtml(byROI,'回収率') || '<p style="color:#4a5a4a">データ不足</p>'}</div>
       </div>
     </div>
     <div class="card">
       <div class="summary-section">
         <h3>🎯 競馬場別 出現率ランキング</h3>
-        <div class="summary-grid">${venueHtmlRate || '<p style="color:#4a5a4a">データ不足</p>'}</div>
+        <div class="summary-grid">${venueRankHtml(byRate,'出現率') || '<p style="color:#4a5a4a">データ不足</p>'}</div>
       </div>
     </div>
     <div class="card" id="venue-today-live-card">
@@ -768,7 +832,6 @@ async function loadSummary() {
     </div>`;
   loadTodayLive();
   loadVenueToday();
-  // 5分ごとに今日のライブデータを自動更新
   if (todayLiveInterval) clearInterval(todayLiveInterval);
   todayLiveInterval = setInterval(loadTodayLive, 5 * 60 * 1000);
 }
