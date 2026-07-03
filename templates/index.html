@@ -375,6 +375,9 @@
       <button class="btn btn-primary" id="btn-missing" onclick="startMissingCollect()">
         🔍 1週間の未収集分を補完する
       </button>
+      <button class="btn btn-secondary" id="btn-extend" onclick="startExtendCollect()">
+        ⏮ 最古データの1週間前を遡って収集
+      </button>
       <button class="btn btn-secondary" id="btn-today" onclick="startCollect('today')">
         📅 本日のデータを今すぐ回収する
       </button>
@@ -495,6 +498,36 @@ function showTab(name) {
 }
 
 // ── データ収集 ────────────────────────────────
+async function startExtendCollect() {
+  const btn = document.getElementById('btn-extend');
+  btn.disabled = true;
+  btn.innerHTML = '<div class="spinner"></div> 確認中...';
+  const logBox = document.getElementById('collect-log');
+  logBox.innerHTML = '';
+  logBox.classList.add('visible');
+
+  try {
+    const res = await fetch('/api/collect/extend', { method: 'POST' });
+    const data = await res.json();
+    if (data.status === 'error') {
+      appendLog('❌ ' + data.message, 'err');
+      btn.disabled = false;
+      btn.innerHTML = '⏮ 最古データの1週間前を遡って収集';
+      return;
+    }
+    appendLog(`📅 最古データ: ${data.oldest}`);
+    appendLog(`📋 収集対象: ${data.targets.join(', ')}`);
+    appendLog('🔄 順番に収集中...');
+    const firstDate = data.targets[0];
+    if (collectPolling) clearInterval(collectPolling);
+    collectPolling = setInterval(() => pollCollect(firstDate, btn, 'btn-extend'), 2000);
+  } catch(e) {
+    appendLog('❌ エラー: ' + e.message, 'err');
+    btn.disabled = false;
+    btn.innerHTML = '⏮ 最古データの1週間前を遡って収集';
+  }
+}
+
 async function startMissingCollect() {
   const btn = document.getElementById('btn-missing');
   btn.disabled = true;
