@@ -130,10 +130,23 @@ def parse_venue_day(html):
             continue
         race_no = int(m.group(1))
 
+        # raceResultから枠番を取得（着順1〜3位の枠）
+        waku_list = []
+        for table in div.find_all("table", class_="raceResult"):
+            for tr in table.find_all("tr"):
+                tds = tr.find_all("td")
+                if len(tds) >= 3:
+                    chakujun = tds[0].get_text(strip=True)
+                    waku = tds[1].get_text(strip=True)
+                    if chakujun in ("1", "2", "3") and re.match(r'^\d+$', waku):
+                        waku_list.append((chakujun, waku))
+            if waku_list:
+                break  # 最初のraceResultテーブルだけ使う
+
+        fuku_entries = []
         for table in div.find_all("table", class_="refund"):
             in_wide = False
             in_fuku = False
-            fuku_entries = []
             for tr in table.find_all("tr"):
                 th = tr.find("th")
                 tds = tr.find_all("td")
@@ -162,12 +175,15 @@ def parse_venue_day(html):
                     if umaban and ninki:
                         fuku_entries.append({"umaban": umaban, "ninki": ninki})
 
-            if fuku_entries:
-                entry = {"race_no": race_no}
-                for i, fe in enumerate(fuku_entries[:3], 1):
-                    entry[f"馬番{i}"] = fe["umaban"]
-                    entry[f"人気{i}"] = fe["ninki"]
-                results.append(entry)
+        if fuku_entries:
+            entry = {"race_no": race_no}
+            for i, fe in enumerate(fuku_entries[:3], 1):
+                entry[f"馬番{i}"] = fe["umaban"]
+                entry[f"人気{i}"] = fe["ninki"]
+                # 枠番を着順から対応付け
+                waku_map = {c: w for c, w in waku_list}
+                entry[f"枠{i}"] = waku_map.get(str(i), "")
+            results.append(entry)
 
     return {"baba": baba, "weather": weather, "races": races, "results": results}
 
@@ -206,13 +222,13 @@ def collect_day(target_date, log):
                 res_path = os.path.join(out_dir, f"{venue_name}_result.csv")
                 with open(res_path, "w", encoding="utf-8", newline="") as f:
                     writer = csv.writer(f)
-                    writer.writerow(["日付", "競馬場", "R", "馬番1", "人気1", "馬番2", "人気2", "馬番3", "人気3"])
+                    writer.writerow(["日付", "競馬場", "R", "馬番1", "人気1", "枠1", "馬番2", "人気2", "枠2", "馬番3", "人気3", "枠3"])
                     for r in result["results"]:
                         writer.writerow([
                             target_date, venue_name, r["race_no"],
-                            r.get("馬番1",""), r.get("人気1",""),
-                            r.get("馬番2",""), r.get("人気2",""),
-                            r.get("馬番3",""), r.get("人気3",""),
+                            r.get("馬番1",""), r.get("人気1",""), r.get("枠1",""),
+                            r.get("馬番2",""), r.get("人気2",""), r.get("枠2",""),
+                            r.get("馬番3",""), r.get("人気3",""), r.get("枠3",""),
                         ])
         except Exception as e:
             log.append(f"⏭ {venue_name}: {e}")
@@ -557,8 +573,10 @@ def api_venue_analysis():
                             "dates": set(),
                             "umaban": defaultdict(int),
                             "ninki": defaultdict(int),
+                            "waku": defaultdict(int),
                             "ninki_pairs": defaultdict(int),
                             "umaban_pairs": defaultdict(int),
+                            "waku_pairs": defaultdict(int),
                             "total": 0,
                         }
                     result[v]["dates"].add(parent)
@@ -587,6 +605,17 @@ def api_venue_analysis():
                     for a in range(len(ubans_sorted)):
                         for b in range(a + 1, len(ubans_sorted)):
                             result[v]["umaban_pairs"][f"{ubans_sorted[a]}-{ubans_sorted[b]}"] += 1
+                    # 枠番・枠ペア
+                    wakus = []
+                    for i in range(1, 4):
+                        wk = row.get(f"枠{i}", "")
+                        if wk:
+                            result[v]["waku"][wk] += 1
+                            wakus.append(int(wk))
+                    wakus_sorted = sorted(set(wakus))
+                    for a in range(len(wakus_sorted)):
+                        for b in range(a + 1, len(wakus_sorted)):
+                            result[v]["waku_pairs"][f"{wakus_sorted[a]}-{wakus_sorted[b]}"] += 1
         except Exception:
             pass
 
@@ -600,8 +629,10 @@ def api_venue_analysis():
             # 絞り直し
             um2 = defaultdict(int)
             nk2 = defaultdict(int)
+            wk2 = defaultdict(int)
             np2 = defaultdict(int)
             up2 = defaultdict(int)
+            wp2 = defaultdict(int)
             tot2 = 0
             for csv_path2 in glob.glob(f"{DATA_DIR}/**/{venue}_result.csv", recursive=True):
                 parent2 = os.path.basename(os.path.dirname(csv_path2))
@@ -631,41 +662,62 @@ def api_venue_analysis():
                             for a in range(len(ubl_s)):
                                 for b in range(a + 1, len(ubl_s)):
                                     up2[f"{ubl_s[a]}-{ubl_s[b]}"] += 1
+                            wkl = []
+                            for i in range(1, 4):
+                                wk = row.get(f"枠{i}", "")
+                                if wk:
+                                    wk2[wk] += 1
+                                    wkl.append(int(wk))
+                            wkl_s = sorted(set(wkl))
+                            for a in range(len(wkl_s)):
+                                for b in range(a + 1, len(wkl_s)):
+                                    wp2[f"{wkl_s[a]}-{wkl_s[b]}"] += 1
                 except Exception:
                     pass
             umaban_cnt = um2
             ninki_cnt = nk2
+            waku_cnt = wk2
             ninki_pairs_cnt = np2
             umaban_pairs_cnt = up2
+            waku_pairs_cnt = wp2
             total = tot2 or total
         else:
             umaban_cnt = d["umaban"]
             ninki_cnt = d["ninki"]
+            waku_cnt = d["waku"]
             ninki_pairs_cnt = d["ninki_pairs"]
             umaban_pairs_cnt = d["umaban_pairs"]
+            waku_pairs_cnt = d["waku_pairs"]
 
         if total == 0:
             continue
 
         top_umaban = sorted(umaban_cnt.items(), key=lambda x: -x[1])[:3]
         top_ninki = sorted(ninki_cnt.items(), key=lambda x: -x[1])[:3]
+        top_waku = sorted(waku_cnt.items(), key=lambda x: -x[1])[:3]
         top_ninki_pairs = sorted(ninki_pairs_cnt.items(), key=lambda x: -x[1])[:3]
         top_umaban_pairs = sorted(umaban_pairs_cnt.items(), key=lambda x: -x[1])[:3]
+        top_waku_pairs = sorted(waku_pairs_cnt.items(), key=lambda x: -x[1])[:3]
 
-        # 激推し：出現率≥50%の馬番 × 出現率≥50%の人気 の組み合わせ
+        # 激推し：出現率≥50%の馬番×人気 と 枠×人気 の組み合わせ
         high_uma = sorted([k for k, c in umaban_cnt.items() if c / total >= 0.5],
                           key=lambda x: -umaban_cnt[x])[:2]
-        high_nk = sorted([k for k, c in ninki_cnt.items() if c / total >= 0.5],
-                         key=lambda x: -ninki_cnt[x])[:2]
-        star = [f"馬番{u}×{n}人気" for u in high_uma for n in high_nk][:4]
+        high_nk  = sorted([k for k, c in ninki_cnt.items() if c / total >= 0.5],
+                          key=lambda x: -ninki_cnt[x])[:2]
+        high_wak = sorted([k for k, c in waku_cnt.items() if c / total >= 0.5],
+                          key=lambda x: -waku_cnt[x])[:2]
+        star = [f"馬番{u}×{n}人気" for u in high_uma for n in high_nk][:3]
+        star += [f"{w}枠×{n}人気" for w in high_wak for n in high_nk if f"{w}枠×{n}人気" not in star][:2]
 
         out.append({
             "venue": venue,
             "total_races": total,
             "top_umaban": [{"umaban": k, "count": c, "rate": round(c / total * 100)} for k, c in top_umaban],
             "top_ninki": [{"ninki": k, "count": c, "rate": round(c / total * 100)} for k, c in top_ninki],
+            "top_waku": [{"waku": k, "count": c, "rate": round(c / total * 100)} for k, c in top_waku],
             "top_umaban_pairs": [{"pair": k, "count": c, "rate": round(c / total * 100)} for k, c in top_umaban_pairs],
             "top_ninki_pairs": [{"pair": k, "count": c, "rate": round(c / total * 100)} for k, c in top_ninki_pairs],
+            "top_waku_pairs": [{"pair": k, "count": c, "rate": round(c / total * 100)} for k, c in top_waku_pairs],
             "star": star,
         })
     out.sort(key=lambda x: x["venue"])

@@ -1172,25 +1172,53 @@ async function loadVenueToday() {
     el.innerHTML = '<p style="color:#4a5a4a;font-size:12px">データなし（本日のデータ回収後に表示されます）</p>';
     return;
   }
+  const WAKU_STYLE = {
+    '1':'background:#eee;color:#333', '2':'background:#222;color:#fff',
+    '3':'background:#e11d48;color:#fff', '4':'background:#1d4ed8;color:#fff',
+    '5':'background:#ca8a04;color:#fff', '6':'background:#16a34a;color:#fff',
+    '7':'background:#ea580c;color:#fff', '8':'background:#db2777;color:#fff',
+  };
+  const WAKU_NAME = {'1':'白','2':'黒','3':'赤','4':'青','5':'黄','6':'緑','7':'橙','8':'桃'};
+
   const chip = (txt, bg) =>
     `<span style="display:inline-block;background:${bg};color:#fff;border-radius:6px;padding:3px 9px;margin:2px;font-size:12px;font-weight:700">${txt}</span>`;
+  const wakuChip = (w, extra) => {
+    const st = WAKU_STYLE[w] || 'background:#666;color:#fff';
+    const nm = WAKU_NAME[w] || w;
+    return `<span style="display:inline-block;${st};border-radius:6px;padding:3px 9px;margin:2px;font-size:12px;font-weight:700">${w}枠(${nm}) ${extra}</span>`;
+  };
 
   el.innerHTML = data.map(v => {
     const umaHtml      = v.top_umaban.map(u => chip(`馬番${u.umaban} ${u.rate}%`, '#1d4ed8')).join('');
     const umaPairHtml  = (v.top_umaban_pairs||[]).map(p => chip(`馬番${p.pair} ${p.rate}%`, '#1e40af')).join('');
     const ninkiHtml    = v.top_ninki.map(n => chip(`${n.ninki}人気 ${n.rate}%`, '#0f766e')).join('');
-    const ninkiPairHtml= v.top_ninki_pairs.map(p => chip(`${p.pair}人気 ${p.rate}%`, '#7c3aed')).join('');
+    const ninkiPairHtml= (v.top_ninki_pairs||[]).map(p => chip(`${p.pair}人気 ${p.rate}%`, '#7c3aed')).join('');
+    const wakuHtml     = (v.top_waku||[]).map(w => wakuChip(w.waku, `${w.rate}%`)).join('');
+    const wakuPairHtml = (v.top_waku_pairs||[]).map(p => {
+      const [a,b] = p.pair.split('-');
+      const stA = WAKU_STYLE[a]||'background:#666;color:#fff';
+      const stB = WAKU_STYLE[b]||'background:#666;color:#fff';
+      const nA = WAKU_NAME[a]||a, nB = WAKU_NAME[b]||b;
+      return `<span style="display:inline-flex;align-items:center;gap:2px;margin:2px">
+        <span style="${stA};border-radius:4px;padding:2px 6px;font-size:11px;font-weight:700">${a}(${nA})</span>
+        <span style="font-size:11px;color:#666">-</span>
+        <span style="${stB};border-radius:4px;padding:2px 6px;font-size:11px;font-weight:700">${b}(${nB})</span>
+        <span style="font-size:11px;color:#666">${p.rate}%</span>
+      </span>`;
+    }).join('');
     const starHtml = v.star && v.star.length
       ? `<div style="margin-top:6px;background:linear-gradient(135deg,#f59e0b,#d97706);border-radius:8px;padding:6px 10px">
-           <span style="font-size:11px;font-weight:700;color:#fff">⭐ 激推し（馬番×人気）：</span><br>
-           <span style="font-size:12px;color:#fff">${v.star.join('　　')}</span>
+           <span style="font-size:11px;font-weight:700;color:#fff">⭐ 激推し：</span><br>
+           <span style="font-size:12px;color:#fff">${v.star.join('　')}</span>
          </div>` : '';
     return `<div style="border:1px solid #e2e8f0;border-radius:10px;padding:10px;margin-bottom:8px">
       <div style="font-weight:700;margin-bottom:6px;font-size:13px">🏟 ${v.venue}（${v.total_races}R分析）</div>
-      <div style="margin-bottom:4px"><span style="font-size:11px;color:#64748b">🐴 当たりやすい馬番：</span><br>${umaHtml || '-'}</div>
-      <div style="margin-bottom:4px"><span style="font-size:11px;color:#64748b">🎫 おすすめ馬番ワイド組み合わせ：</span><br>${umaPairHtml || '-'}</div>
-      <div style="margin-bottom:4px"><span style="font-size:11px;color:#64748b">🎯 当たりやすい人気：</span><br>${ninkiHtml || '-'}</div>
-      <div style="margin-bottom:4px"><span style="font-size:11px;color:#64748b">🎫 おすすめ人気ワイド組み合わせ：</span><br>${ninkiPairHtml || '-'}</div>
+      <div style="margin-bottom:4px"><span style="font-size:11px;color:#64748b">🐴 当たりやすい馬番：</span><br>${umaHtml||'-'}</div>
+      <div style="margin-bottom:4px"><span style="font-size:11px;color:#64748b">🎫 おすすめ馬番ワイド：</span><br>${umaPairHtml||'-'}</div>
+      <div style="margin-bottom:4px"><span style="font-size:11px;color:#64748b">🎯 当たりやすい人気：</span><br>${ninkiHtml||'-'}</div>
+      <div style="margin-bottom:4px"><span style="font-size:11px;color:#64748b">🎫 おすすめ人気ワイド：</span><br>${ninkiPairHtml||'-'}</div>
+      <div style="margin-bottom:4px"><span style="font-size:11px;color:#64748b">🎨 当たりやすい枠色：</span><br>${wakuHtml||'-'}</div>
+      <div style="margin-bottom:4px"><span style="font-size:11px;color:#64748b">🎫 おすすめ枠色ワイド：</span><br>${wakuPairHtml||'-'}</div>
       ${starHtml}
     </div>`;
   }).join('');
