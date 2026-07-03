@@ -469,7 +469,7 @@
     </div>
 
     <div class="period-bar">
-      <div class="period-btn active" onclick="selectRacePeriod(14, this)">2週間</div>
+      <div class="period-btn active" onclick="selectRacePeriod('recent3', this)">直近3回</div>
       <div class="period-btn" onclick="selectRacePeriod(30, this)">1ヶ月</div>
       <div class="period-btn" onclick="selectRacePeriod(null, this)">全期間</div>
     </div>
@@ -957,6 +957,7 @@ async function loadTrend() {
 // ── レース分析 ────────────────────────────────
 let currentRaceMode = 'pattern';
 let currentPatternVenue = null;
+let currentRaceRecent = 3;
 
 function selectRaceMode(mode, el) {
   currentRaceMode = mode;
@@ -986,6 +987,7 @@ async function loadPatterns() {
   area.innerHTML = '<div class="loading-center"><div class="spinner" style="margin:0 auto 12px"></div><br>分析中...</div>';
   const params = new URLSearchParams({ venue: currentPatternVenue });
   if (currentRaceDays) params.set('days', currentRaceDays);
+  if (currentRaceRecent) params.set('recent', currentRaceRecent);
   const data = await fetch('/api/race_patterns?' + params).then(r=>r.json()).catch(()=>null);
   if (!data || !Object.keys(data.patterns).length) {
     area.innerHTML = '<div class="loading-center">データなし</div>'; return;
@@ -1028,7 +1030,13 @@ async function loadPatterns() {
 
 function selectRacePeriod(days, el) {
   currentRaceToday = false;
-  currentRaceDays = days;
+  if (days === 'recent3') {
+    currentRaceDays = null;
+    currentRaceRecent = 3;
+  } else {
+    currentRaceDays = days;
+    currentRaceRecent = null;
+  }
   document.querySelectorAll('#tab-races .period-btn').forEach(b => b.classList.remove('active'));
   el.classList.add('active');
   if (currentPatternVenue) loadPatterns();

@@ -84,10 +84,8 @@ def calc_stats(rows):
 
 
 def recommend(stats):
-    over100 = [s for s in stats if s['回収率'] >= 100 and s['人気'] <= 20]
-    if not over100:
-        over100 = sorted(stats, key=lambda x: -x['回収率'])[:3]
-    return sorted(over100, key=lambda x: (-x['回収率'], x['人気']))[:3]
+    filtered = [s for s in stats if s['回収率'] >= 100 and s['人気'] <= 20 and s['出現数'] >= 2]
+    return sorted(filtered, key=lambda x: (-x['回収率'], x['人気']))[:3]
 
 
 # ── スクレイピング ────────────────────────────────────
@@ -420,10 +418,14 @@ def api_races():
 def api_race_patterns():
     venue = request.args.get("venue")
     days = request.args.get("days", type=int)
+    recent = request.args.get("recent", type=int)  # 直近N回（開催日数）
     if not venue:
         return jsonify({"error": "venue required"})
 
     rows = load_all_data(venue=venue, days=days)
+    if recent:
+        dates = sorted(set(r['日付'] for r in rows), reverse=True)[:recent]
+        rows = [r for r in rows if r['日付'] in dates]
     if not rows:
         return jsonify({"patterns": {}, "venue": venue})
 
