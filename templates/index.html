@@ -490,6 +490,7 @@ let collectPolling = null;
 let currentFieldSize = null;
 let todayLiveInterval = null;
 let currentSummaryVenue = null;
+let currentTrendVenue = null;
 
 function showTab(name) {
   ['collect','summary','analysis','races','history'].forEach(t => {
@@ -821,6 +822,9 @@ async function loadSummary() {
     <div class="card" id="venue-today-card">
       <div class="summary-section">
         <h3>🏇 競馬場別 出現傾向</h3>
+        <div class="venue-grid" id="trend-venue-grid" style="margin-bottom:12px">
+          <div class="venue-btn all-btn active" onclick="selectTrendVenue(null,this)">全場</div>
+        </div>
         <div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:10px">
           <button onclick="setFieldSize(null,this)" style="padding:6px 12px;border-radius:16px;border:1px solid #dde3ef;background:#1d4ed8;color:#fff;font-size:12px;font-weight:700;cursor:pointer" id="fs-all">全頭数</button>
           <button onclick="setFieldSize('small',this)" style="padding:6px 12px;border-radius:16px;border:1px solid #dde3ef;background:#f0f4ff;color:#8a9ab8;font-size:12px;font-weight:700;cursor:pointer" id="fs-small">少頭数(〜8頭)</button>
@@ -1231,6 +1235,21 @@ async function loadVenueToday() {
     el.innerHTML = '<p style="color:#4a5a4a;font-size:12px">データなし（本日のデータ回収後に表示されます）</p>';
     return;
   }
+
+  // 競馬場グリッドを（初回のみ）生成
+  const grid = document.getElementById('trend-venue-grid');
+  if (grid && grid.querySelectorAll('.venue-btn').length <= 1) {
+    data.forEach(v => {
+      const btn = document.createElement('div');
+      btn.className = 'venue-btn';
+      btn.textContent = v.venue;
+      btn.onclick = () => selectTrendVenue(v.venue, btn);
+      grid.appendChild(btn);
+    });
+  }
+
+  // 競馬場フィルター適用
+  const filtered = currentTrendVenue ? data.filter(v => v.venue === currentTrendVenue) : data;
   const WAKU_STYLE = {
     '1':'background:#eee;color:#333', '2':'background:#222;color:#fff',
     '3':'background:#e11d48;color:#fff', '4':'background:#1d4ed8;color:#fff',
@@ -1247,7 +1266,7 @@ async function loadVenueToday() {
     return `<span style="display:inline-block;${st};border-radius:6px;padding:3px 9px;margin:2px;font-size:12px;font-weight:700">${w}枠(${nm}) ${extra}</span>`;
   };
 
-  el.innerHTML = data.map(v => {
+  el.innerHTML = filtered.map(v => {
     const T = v.total_races;
     const umaHtml      = v.top_umaban.map(u => chip(`馬番${u.umaban} ${u.count}/${T}R (${u.rate}%)`, '#1d4ed8')).join('');
     const umaPairHtml  = (v.top_umaban_pairs||[]).map(p => chip(`馬番${p.pair} ${p.count}/${T}R (${p.rate}%)`, '#1e40af')).join('');
@@ -1282,6 +1301,13 @@ async function loadVenueToday() {
       ${starHtml}
     </div>`;
   }).join('');
+}
+
+function selectTrendVenue(venue, el) {
+  currentTrendVenue = venue;
+  document.querySelectorAll('#trend-venue-grid .venue-btn').forEach(b => b.classList.remove('active'));
+  el.classList.add('active');
+  loadVenueToday();
 }
 
 function setFieldSize(size, btn) {
