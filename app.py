@@ -119,7 +119,8 @@ def parse_venue_day(html):
                 weather = w
                 break
 
-    races = []
+    races = []    # ワイド払戻データ
+    results = []  # 複勝データ（1〜3位馬番＋人気）
 
     # div.roundWrapper ごとにレースが入っている
     for div in soup.find_all("div", class_="roundWrapper"):
@@ -129,27 +130,46 @@ def parse_venue_day(html):
             continue
         race_no = int(m.group(1))
 
-        # refundテーブルからワイドを取得
-        in_wide = False
         for table in div.find_all("table", class_="refund"):
+            in_wide = False
+            in_fuku = False
+            fuku_entries = []
             for tr in table.find_all("tr"):
                 th = tr.find("th")
                 tds = tr.find_all("td")
                 if th:
-                    in_wide = "ワイド" in th.get_text()
-                if not in_wide or len(tds) < 2:
-                    continue
-                combo = tds[0].get_text(strip=True)
-                pay = re.sub(r'[^\d]', '', tds[1].get_text())
-                ninki = ""
-                if len(tds) >= 3:
-                    nm = re.search(r'(\d+)', tds[2].get_text())
-                    if nm:
-                        ninki = nm.group(1)
-                if combo and pay:
-                    races.append({"race_no": race_no, "combo": combo, "ninki": ninki, "pay": pay})
+                    th_txt = th.get_text(strip=True)
+                    in_wide = "ワイド" in th_txt
+                    in_fuku = "複勝" in th_txt
 
-    return {"baba": baba, "weather": weather, "races": races}
+                # ワイド
+                if in_wide and len(tds) >= 2:
+                    combo = tds[0].get_text(strip=True)
+                    pay = re.sub(r'[^\d]', '', tds[1].get_text())
+                    ninki = ""
+                    if len(tds) >= 3:
+                        nm = re.search(r'(\d+)', tds[2].get_text())
+                        if nm:
+                            ninki = nm.group(1)
+                    if combo and pay:
+                        races.append({"race_no": race_no, "combo": combo, "ninki": ninki, "pay": pay})
+
+                # 複勝（1〜3位馬番＋人気）
+                if in_fuku and len(tds) >= 3:
+                    umaban = tds[0].get_text(strip=True)
+                    nm = re.search(r'(\d+)', tds[2].get_text())
+                    ninki = nm.group(1) if nm else ""
+                    if umaban and ninki:
+                        fuku_entries.append({"umaban": umaban, "ninki": ninki})
+
+            if fuku_entries:
+                entry = {"race_no": race_no}
+                for i, fe in enumerate(fuku_entries[:3], 1):
+                    entry[f"馬番{i}"] = fe["umaban"]
+                    entry[f"人気{i}"] = fe["ninki"]
+                results.append(entry)
+
+    return {"baba": baba, "weather": weather, "races": races, "results": results}
 
 
 def collect_day(target_date, log):
@@ -181,6 +201,19 @@ def collect_day(target_date, log):
                 log.append(f"✅ {venue_name}: {num_races}R 保存")
             else:
                 log.append(f"⏭ {venue_name}: データなし")
+            # 複勝データ保存
+            if result.get("results"):
+                res_path = os.path.join(out_dir, f"{venue_name}_result.csv")
+                with open(res_path, "w", encoding="utf-8", newline="") as f:
+                    writer = csv.writer(f)
+                    writer.writerow(["日付", "競馬場", "R", "馬番1", "人気1", "馬番2", "人気2", "馬番3", "人気3"])
+                    for r in result["results"]:
+                        writer.writerow([
+                            target_date, venue_name, r["race_no"],
+                            r.get("馬番1",""), r.get("人気1",""),
+                            r.get("馬番2",""), r.get("人気2",""),
+                            r.get("馬番3",""), r.get("人気3",""),
+                        ])
         except Exception as e:
             log.append(f"⏭ {venue_name}: {e}")
 
@@ -525,6 +558,67 @@ def api_trend():
     rows = load_all_data(days=days)
     target_pops = [int(p) for p in pops_param.split(",")] if pops_param else None
     return jsonify(calc_trend(rows, target_pops))
+
+
+@app.route("/api/venue_analysis")
+def api_venue_analysis():
+    """競馬場別 馬番・人気の出現率（複勝データ使用）"""
+    days = request.args.get("days", type=int)
+    today_only = request.args.get("today") == "1"
+    meetings = request.args.get("meetings", type=int)
+
+    today_str = date.today().isoformat()
+    if today_only:
+        cutoff = today_str
+    elif days:
+        cutoff = (date.today() - timedelta(days=days - 1)).isoformat()
+    else:
+        cutoff = None
+
+    result = {}
+    for csv_path in sorted(glob.glob(f"{DATA_DIR}/**/*_result.csv", recursive=True)):
+        parent = os.path.basename(os.path.dirname(csv_path))
+        if not re.match(r'^\d{4}-\d{2}-\d{2}$', parent):
+            continue
+        if today_only and parent != today_str:
+            continue
+        if cutoff and not today_only and parent < cutoff:
+            continue
+        try:
+            with open(csv_path, encoding="utf-8") as f:
+                for row in csv.DictReader(f):
+                    v = row.get("競馬場", "")
+                    if v not in result:
+                        result[v] = {"dates": set(), "umaban": defaultdict(int), "ninki": defaultdict(int), "total": 0}
+                    result[v]["dates"].add(parent)
+                    result[v]["total"] += 1
+                    for i in range(1, 4):
+                        ub = row.get(f"馬番{i}", "")
+                        nk = row.get(f"人気{i}", "")
+                        if ub:
+                            result[v]["umaban"][ub] += 1
+                        if nk:
+                            result[v]["ninki"][nk] += 1
+        except Exception:
+            pass
+
+    out = []
+    for venue, d in result.items():
+        total = d["total"]
+        if meetings:
+            dates = sorted(d["dates"], reverse=True)[:meetings]
+            # meetings対応は簡易版（全データから件数でフィルタせず上位だけ出す）
+        top_umaban = sorted(d["umaban"].items(), key=lambda x: -x[1])[:3]
+        top_ninki = sorted(d["ninki"].items(), key=lambda x: -int(x[0]) * -1)[:3]
+        top_ninki = sorted(d["ninki"].items(), key=lambda x: -x[1])[:3]
+        out.append({
+            "venue": venue,
+            "total_races": total,
+            "top_umaban": [{"umaban": k, "count": v, "rate": round(v / total * 100)} for k, v in top_umaban],
+            "top_ninki": [{"ninki": k, "count": v, "rate": round(v / total * 100)} for k, v in top_ninki],
+        })
+    out.sort(key=lambda x: x["venue"])
+    return jsonify(out)
 
 
 @app.route("/api/upload_csv", methods=["POST"])
