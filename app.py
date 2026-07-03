@@ -589,9 +589,16 @@ def api_venue_analysis():
                 for row in csv.DictReader(f):
                     v = row.get("競馬場", "")
                     if v not in result:
-                        result[v] = {"dates": set(), "umaban": defaultdict(int), "ninki": defaultdict(int), "total": 0}
+                        result[v] = {
+                            "dates": set(),
+                            "umaban": defaultdict(int),
+                            "ninki": defaultdict(int),
+                            "ninki_pairs": defaultdict(int),
+                            "total": 0,
+                        }
                     result[v]["dates"].add(parent)
                     result[v]["total"] += 1
+                    ninkis = []
                     for i in range(1, 4):
                         ub = row.get(f"馬番{i}", "")
                         nk = row.get(f"人気{i}", "")
@@ -599,6 +606,13 @@ def api_venue_analysis():
                             result[v]["umaban"][ub] += 1
                         if nk:
                             result[v]["ninki"][nk] += 1
+                            ninkis.append(int(nk))
+                    # 人気ペア（ワイド人気組み合わせ）
+                    ninkis_sorted = sorted(set(ninkis))
+                    for a in range(len(ninkis_sorted)):
+                        for b in range(a + 1, len(ninkis_sorted)):
+                            key = f"{ninkis_sorted[a]}-{ninkis_sorted[b]}"
+                            result[v]["ninki_pairs"][key] += 1
         except Exception:
             pass
 
@@ -606,16 +620,70 @@ def api_venue_analysis():
     for venue, d in result.items():
         total = d["total"]
         if meetings:
-            dates = sorted(d["dates"], reverse=True)[:meetings]
-            # meetings対応は簡易版（全データから件数でフィルタせず上位だけ出す）
-        top_umaban = sorted(d["umaban"].items(), key=lambda x: -x[1])[:3]
-        top_ninki = sorted(d["ninki"].items(), key=lambda x: -int(x[0]) * -1)[:3]
-        top_ninki = sorted(d["ninki"].items(), key=lambda x: -x[1])[:3]
+            # meetings指定時は直近N開催日分に絞る
+            dates_sorted = sorted(d["dates"], reverse=True)[:meetings]
+            dates_set = set(dates_sorted)
+            # 絞り直し
+            um2 = defaultdict(int)
+            nk2 = defaultdict(int)
+            np2 = defaultdict(int)
+            tot2 = 0
+            for csv_path2 in glob.glob(f"{DATA_DIR}/**/{venue}_result.csv", recursive=True):
+                parent2 = os.path.basename(os.path.dirname(csv_path2))
+                if parent2 not in dates_set:
+                    continue
+                try:
+                    with open(csv_path2, encoding="utf-8") as f2:
+                        for row in csv.DictReader(f2):
+                            tot2 += 1
+                            nkl = []
+                            for i in range(1, 4):
+                                ub = row.get(f"馬番{i}", "")
+                                nk = row.get(f"人気{i}", "")
+                                if ub: um2[ub] += 1
+                                if nk:
+                                    nk2[nk] += 1
+                                    nkl.append(int(nk))
+                            nkl_s = sorted(set(nkl))
+                            for a in range(len(nkl_s)):
+                                for b in range(a + 1, len(nkl_s)):
+                                    np2[f"{nkl_s[a]}-{nkl_s[b]}"] += 1
+                except Exception:
+                    pass
+            umaban_cnt = um2
+            ninki_cnt = nk2
+            ninki_pairs_cnt = np2
+            total = tot2 or total
+        else:
+            umaban_cnt = d["umaban"]
+            ninki_cnt = d["ninki"]
+            ninki_pairs_cnt = d["ninki_pairs"]
+
+        if total == 0:
+            continue
+
+        top_umaban = sorted(umaban_cnt.items(), key=lambda x: -x[1])[:3]
+        top_ninki = sorted(ninki_cnt.items(), key=lambda x: -x[1])[:3]
+        top_ninki_pairs = sorted(ninki_pairs_cnt.items(), key=lambda x: -x[1])[:3]
+
+        # 激推し：馬番出現率≥50% かつ 人気出現率≥50% が重なるもの
+        high_uma = {k for k, c in umaban_cnt.items() if c / total >= 0.5}
+        high_nk = {k for k, c in ninki_cnt.items() if c / total >= 0.5}
+        star = []
+        if high_uma and high_nk:
+            star = [
+                f"馬番{u}×{n}人気"
+                for u in sorted(high_uma, key=lambda x: -umaban_cnt[x])[:2]
+                for n in sorted(high_nk, key=lambda x: -ninki_cnt[x])[:2]
+            ][:3]
+
         out.append({
             "venue": venue,
             "total_races": total,
-            "top_umaban": [{"umaban": k, "count": v, "rate": round(v / total * 100)} for k, v in top_umaban],
-            "top_ninki": [{"ninki": k, "count": v, "rate": round(v / total * 100)} for k, v in top_ninki],
+            "top_umaban": [{"umaban": k, "count": c, "rate": round(c / total * 100)} for k, c in top_umaban],
+            "top_ninki": [{"ninki": k, "count": c, "rate": round(c / total * 100)} for k, c in top_ninki],
+            "top_ninki_pairs": [{"pair": k, "count": c, "rate": round(c / total * 100)} for k, c in top_ninki_pairs],
+            "star": star,
         })
     out.sort(key=lambda x: x["venue"])
     return jsonify(out)
