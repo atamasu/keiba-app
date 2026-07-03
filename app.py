@@ -546,6 +546,27 @@ def api_upload_csv():
     return jsonify({"ok": True})
 
 
+@app.route("/api/debug/files")
+def api_debug_files():
+    import os
+    result = {
+        "DATA_DIR": DATA_DIR,
+        "DATA_DIR_exists": os.path.exists(DATA_DIR),
+        "folders": [],
+        "total_csv": 0,
+    }
+    try:
+        for entry in sorted(os.listdir(DATA_DIR)):
+            full = os.path.join(DATA_DIR, entry)
+            if os.path.isdir(full):
+                csvs = glob.glob(f"{full}/*.csv")
+                result["folders"].append({"name": entry, "csvs": len(csvs)})
+                result["total_csv"] += len(csvs)
+    except Exception as e:
+        result["error"] = str(e)
+    return jsonify(result)
+
+
 @app.route("/api/recent")
 def api_recent():
     folders = sorted(glob.glob(f"{DATA_DIR}/202*"), reverse=True)[:10]
