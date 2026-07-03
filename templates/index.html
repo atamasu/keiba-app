@@ -633,8 +633,13 @@ async function pollCollect(targetDate, btn, btnId) {
     if (data.status === 'done' || data.status === 'error') {
       clearInterval(collectPolling);
       btn.disabled = false;
-      const label = btnId === 'btn-yesterday' ? '📥 昨日のデータを回収する' : '📅 本日のデータを今すぐ回収する';
-      btn.innerHTML = label;
+      const labels = {
+        'btn-yesterday': '📥 昨日のデータを回収する',
+        'btn-today':     '📅 本日のデータを今すぐ回収する',
+        'btn-extend':    '⏮ 最古データの1週間前を遡って収集',
+        'btn-missing':   '🔍 1週間の未収集分を補完する',
+      };
+      btn.innerHTML = labels[btnId] || '📅 本日のデータを今すぐ回収する';
       if (data.status === 'done') loadRecent();
     }
   } catch(e) {}
