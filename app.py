@@ -168,7 +168,7 @@ def collect_day(target_date, log):
                             str(r), w["combo"], w["ninki"], w["pay"]
                         ])
             except Exception as e:
-                pass
+                log.append(f"  ⚠️ R{r:02d} エラー: {e}")
 
         if venue_ok and race_rows:
             csv_path = os.path.join(out_dir, f"{venue_name}.csv")
