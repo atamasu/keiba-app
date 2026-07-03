@@ -363,7 +363,6 @@
   <div class="tab-bar">
     <div class="tab active" onclick="showTab('collect')">📥 収集</div>
     <div class="tab" onclick="showTab('summary')">🏆 おすすめ</div>
-    <div class="tab" onclick="showTab('trend')">📈 トレンド</div>
     <div class="tab" onclick="showTab('analysis')">📊 詳細</div>
     <div class="tab" onclick="showTab('races')">📑 レース</div>
     <div class="tab" onclick="showTab('history')">📋 履歴</div>
@@ -378,9 +377,6 @@
       </button>
       <button class="btn btn-secondary" id="btn-today" onclick="startCollect('today')">
         📅 本日のデータを今すぐ回収する
-      </button>
-      <button class="btn btn-secondary" id="btn-yesterday" onclick="startCollect('yesterday')">
-        📥 昨日のデータを回収する
       </button>
       <div id="collect-log" class="log-box"></div>
     </div>
@@ -400,29 +396,6 @@
       <div class="period-btn" onclick="selectPeriod(null, this)">全期間</div>
     </div>
     <div id="summary-area"><div class="loading-center">読み込み中...</div></div>
-  </div>
-
-  <!-- トレンドタブ -->
-  <div id="tab-trend" style="display:none">
-    <div class="card">
-      <h2>期間</h2>
-      <div class="period-bar" style="margin-bottom:0">
-        <div class="period-btn" onclick="selectTrendDays(7, this)">1週間</div>
-        <div class="period-btn active" onclick="selectTrendDays(14, this)">2週間</div>
-        <div class="period-btn" onclick="selectTrendDays(30, this)">1ヶ月</div>
-      </div>
-    </div>
-    <div class="card">
-      <h2>人気別 回収率トレンド</h2>
-      <div style="position:relative;height:260px">
-        <canvas id="trend-chart"></canvas>
-      </div>
-      <div id="trend-legend" style="display:flex;flex-wrap:wrap;gap:10px;margin-top:14px;font-size:12px;font-weight:700"></div>
-    </div>
-    <div class="card">
-      <h2>直近の変化</h2>
-      <div id="trend-change-list"><div class="loading-center">読み込み中...</div></div>
-    </div>
   </div>
 
   <!-- 回収率分析タブ -->
@@ -506,14 +479,13 @@ let currentToday = false;
 let collectPolling = null;
 
 function showTab(name) {
-  ['collect','summary','trend','analysis','races','history'].forEach(t => {
+  ['collect','summary','analysis','races','history'].forEach(t => {
     document.getElementById('tab-'+t).style.display = t===name ? '' : 'none';
   });
   document.querySelectorAll('.tab').forEach((el,i) => {
-    el.classList.toggle('active', ['collect','summary','trend','analysis','races','history'][i] === name);
+    el.classList.toggle('active', ['collect','summary','analysis','races','history'][i] === name);
   });
   if (name === 'summary') loadSummary();
-  if (name === 'trend') loadTrend();
   if (name === 'races') {
     if (!document.querySelector('#pattern-venue-grid .venue-btn')) loadPatternVenues();
   }
