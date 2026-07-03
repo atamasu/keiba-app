@@ -750,38 +750,6 @@ async function loadSummary() {
   const venueHtmlROI  = venueRankHtml(byROI, '回収率');
   const venueHtmlRate = venueRankHtml(byRate, '出現率');
 
-  const babaHtml = data.by_baba.map(b => {
-    const r = b.top;
-    const icon = BABA_ICON[b.baba] || '';
-    return `<div class="summary-row">
-      <div class="summary-label">${icon} ${b.baba}</div>
-      <div class="summary-pop">${r.人気}人気</div>
-      <div class="summary-detail">
-        平均 ${r.平均配当.toLocaleString()}円<br>出現率 ${r.出現率}%
-      </div>
-      <div style="text-align:right">
-        ${roiBadge(r.回収率)}
-        <div class="summary-races">${b.total_races}R</div>
-      </div>
-    </div>`;
-  }).join('');
-
-  const tenkouHtml = data.by_tenkou.map(t => {
-    const r = t.top;
-    const icon = TENKOU_ICON[t.tenkou] || '';
-    return `<div class="summary-row">
-      <div class="summary-label">${icon} ${t.tenkou}</div>
-      <div class="summary-pop">${r.人気}人気</div>
-      <div class="summary-detail">
-        平均 ${r.平均配当.toLocaleString()}円<br>出現率 ${r.出現率}%
-      </div>
-      <div style="text-align:right">
-        ${roiBadge(r.回収率)}
-        <div class="summary-races">${t.total_races}R</div>
-      </div>
-    </div>`;
-  }).join('');
-
   area.innerHTML = `
     <div class="card">
       <div class="summary-section">
@@ -805,18 +773,6 @@ async function loadSummary() {
       <div class="summary-section">
         <h3>🏇 競馬場別 本日の出現傾向</h3>
         <div id="venue-today-area"><div class="loading-center" style="font-size:12px">読み込み中...</div></div>
-      </div>
-    </div>
-    <div class="card">
-      <div class="summary-section">
-        <h3>🌾 馬場状態別おすすめ</h3>
-        <div class="summary-grid">${babaHtml || '<p style="color:#4a5a4a">データ不足</p>'}</div>
-      </div>
-    </div>
-    <div class="card">
-      <div class="summary-section">
-        <h3>🌤 天候別おすすめ</h3>
-        <div class="summary-grid">${tenkouHtml || '<p style="color:#4a5a4a">データ不足</p>'}</div>
       </div>
     </div>`;
   loadVenueToday();

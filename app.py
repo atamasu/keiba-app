@@ -316,40 +316,6 @@ def api_summary():
             })
     venue_recs = sorted(venue_recs, key=lambda x: -x['top']['回収率'])
 
-    # 馬場状態別おすすめ
-    baba_order = ['良', '稍重', '重', '不良']
-    baba_recs = []
-    for b in baba_order:
-        brows = [r for r in rows if r.get('馬場状態') == b]
-        if not brows:
-            continue
-        bstats = calc_stats(brows)
-        brec = recommend(bstats)
-        if brec:
-            total = bstats[0]['total_races'] if bstats else 0
-            baba_recs.append({
-                "baba": b,
-                "total_races": total,
-                "top": brec[0]
-            })
-
-    # 天候別おすすめ
-    tenkous = sorted(set(r['天候'] for r in rows if r.get('天候') and r['天候'] != '不明'))
-    tenkou_recs = []
-    for t in tenkous:
-        trows = [r for r in rows if r.get('天候') == t]
-        if not trows:
-            continue
-        tstats = calc_stats(trows)
-        trec = recommend(tstats)
-        if trec:
-            total = tstats[0]['total_races'] if tstats else 0
-            tenkou_recs.append({
-                "tenkou": t,
-                "total_races": total,
-                "top": trec[0]
-            })
-
     total_races = overall_stats[0]['total_races'] if overall_stats else 0
     return jsonify({
         "total_races": total_races,
@@ -357,8 +323,6 @@ def api_summary():
         "today_only": today_only,
         "overall": overall_rec,
         "by_venue": venue_recs,
-        "by_baba": baba_recs,
-        "by_tenkou": tenkou_recs
     })
 
 
