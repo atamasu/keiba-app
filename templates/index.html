@@ -610,7 +610,7 @@ async function startCollect(when) {
   } catch(e) {
     appendLog('❌ エラー: ' + e.message, 'err');
     btn.disabled = false;
-    btn.innerHTML = when==='yesterday' ? '📥 昨日のデータを回収する' : '📅 本日のデータを回収する';
+    btn.innerHTML = when==='yesterday' ? '📥 昨日のデータを回収する' : '📅 本日のデータを今すぐ回収する';
   }
 }
 
@@ -631,7 +631,7 @@ async function pollCollect(targetDate, btn, btnId) {
     if (data.status === 'done' || data.status === 'error') {
       clearInterval(collectPolling);
       btn.disabled = false;
-      const label = btnId === 'btn-yesterday' ? '📥 昨日のデータを回収する' : '📅 本日のデータを回収する';
+      const label = btnId === 'btn-yesterday' ? '📥 昨日のデータを回収する' : '📅 本日のデータを今すぐ回収する';
       btn.innerHTML = label;
       if (data.status === 'done') loadRecent();
     }
