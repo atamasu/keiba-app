@@ -557,7 +557,7 @@ async function startMissingCollect() {
     if (collectPolling) clearInterval(collectPolling);
     collectPolling = setInterval(async () => {
       const results = await Promise.all(
-        missingDates.map(d => fetch(`/api/collect/status?date=${d}`).then(r=>r.json()).catch(()=>null))
+        missingDates.map(d => fetch(API+`/api/collect/status?date=${d}`).then(r=>r.json()).catch(()=>null))
       );
       const logBox = document.getElementById('collect-log');
       logBox.innerHTML = results.filter(Boolean).map(r => {
