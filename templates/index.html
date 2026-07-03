@@ -501,7 +501,7 @@ function showTab(name) {
   if (name === 'collect') loadRecent();
 }
 
-const API = location.origin;
+const API = (location.origin && location.origin !== 'null') ? location.origin : '';
 
 // ── データ収集 ────────────────────────────────
 async function startExtendCollect() {
