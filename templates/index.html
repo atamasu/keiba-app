@@ -545,12 +545,35 @@ async function startMissingCollect() {
       btn.innerHTML = '🔍 1週間の未収集分を補完する';
       return;
     }
-    appendLog(`📋 未収集日: ${data.missing.join(', ')}`);
+    const missingDates = data.missing.sort();
+    appendLog(`📋 未収集: ${missingDates.join(', ')}`);
     appendLog('🔄 順番に収集中...');
-    // 最初の日付をポーリング（完了後に次へ進む）
-    const firstDate = data.missing[0];
     if (collectPolling) clearInterval(collectPolling);
-    collectPolling = setInterval(() => pollCollect(firstDate, btn, 'btn-missing'), 2000);
+    collectPolling = setInterval(async () => {
+      const results = await Promise.all(
+        missingDates.map(d => fetch(`/api/collect/status?date=${d}`).then(r=>r.json()).catch(()=>null))
+      );
+      const logBox = document.getElementById('collect-log');
+      logBox.innerHTML = results.filter(Boolean).map(r => {
+        return r.log.map(line => {
+          let cls = 'log-line';
+          if (line.startsWith('✅')) cls += ' ok';
+          else if (line.startsWith('⏭')) cls += ' skip';
+          else if (line.startsWith('❌')) cls += ' err';
+          return `<div class="${cls}">[${r.date}] ${line}</div>`;
+        }).join('');
+      }).join('');
+      logBox.scrollTop = logBox.scrollHeight;
+
+      const allDone = results.every(r => r && (r.status === 'done' || r.status === 'error'));
+      if (allDone) {
+        clearInterval(collectPolling);
+        btn.disabled = false;
+        btn.innerHTML = '🔍 1週間の未収集分を補完する';
+        appendLog('🎉 全日付の収集完了！');
+        loadRecent();
+      }
+    }, 2000);
   } catch(e) {
     appendLog('❌ エラー: ' + e.message, 'err');
     btn.disabled = false;

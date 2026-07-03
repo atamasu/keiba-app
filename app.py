@@ -410,9 +410,7 @@ def api_collect_missing():
         return jsonify({"status": "none", "message": "未収集データなし", "missing": []})
 
     def collect_all_missing():
-        for d in missing:
-            if collect_status.get(d, {}).get("status") == "running":
-                continue
+        for d in sorted(missing):
             run_collect(d)
 
     thread = threading.Thread(target=collect_all_missing, daemon=True)
