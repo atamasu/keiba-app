@@ -12,14 +12,13 @@ app = Flask(__name__)
 DATA_DIR = os.environ.get("DATA_DIR", "/Users/hagiharadaiki/Desktop/地方競馬まとめ")
 
 VENUE_CODES = {
-    "門別": "30", "盛岡": "35", "水沢": "36", "浦和": "42",
-    "船橋": "43", "大井": "44", "川崎": "45", "金沢": "46",
-    "笠松": "47", "名古屋": "48", "園田": "50", "姫路": "51",
-    "高知": "54", "佐賀": "55"
+    "帯広": "3", "盛岡": "10", "水沢": "11", "浦和": "18",
+    "船橋": "19", "大井": "20", "川崎": "21", "金沢": "22",
+    "笠松": "23", "名古屋": "24", "園田": "27", "高知": "31",
+    "佐賀": "32", "門別": "36"
 }
 
-WEATHER_MAP = {1: "晴", 2: "曇", 3: "雨", 4: "小雨", 10: "雪"}
-BABA_MAP = {"良": "良", "稍": "稍重", "重": "重", "不": "不良"}
+BABA_MAP = {"良": "良", "稍重": "稍重", "重": "重", "不良": "不良"}
 
 collect_status = {}  # {date: {"status": "running"|"done"|"error", "log": [...]}}
 
@@ -90,100 +89,100 @@ def recommend(stats):
 
 # ── スクレイピング ────────────────────────────────────
 
-def fetch_html(url, timeout=8):
+def fetch_html(url, timeout=10):
     req = urllib.request.Request(url, headers={
-        "User-Agent": "Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1",
-        "Referer": "https://nar.netkeiba.com/",
-        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
-        "Accept-Language": "ja,en-US;q=0.7,en;q=0.3",
+        "User-Agent": "Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15",
+        "Referer": "https://www.keiba.go.jp/",
+        "Accept": "text/html,application/xhtml+xml",
+        "Accept-Language": "ja",
     })
     with urllib.request.urlopen(req, timeout=timeout) as res:
         return res.read().decode("utf-8", errors="replace")
 
 
-def parse_race(html):
+def parse_venue_day(html):
+    """keiba.go.jp の RefundMoneyList ページを解析し、全レースのワイドデータを返す"""
     soup = BeautifulSoup(html, "html.parser")
 
-    # 天候
-    weather_tag = soup.find(class_=re.compile(r'^Icon_Weather'))
-    weather = "不明"
-    if weather_tag:
-        for c in weather_tag.get("class", []):
-            m = re.search(r'Weather(\d+)', c)
-            if m:
-                weather = WEATHER_MAP.get(int(m.group(1)), "不明")
-
-    # 馬場状態
+    # 馬場状態・天候をh3から取得
     baba = "不明"
-    item04 = soup.find("span", class_="Item04")
-    if item04:
-        t = item04.get_text()
-        m = re.search(r'馬場[:：]\s*(\S)', t)
-        if m:
-            baba = BABA_MAP.get(m.group(1), m.group(1))
+    weather = "不明"
+    h3 = soup.find("h3", class_="refund")
+    if h3:
+        txt = h3.get_text()
+        for b in ["不良", "稍重", "重", "良"]:
+            if b in txt:
+                baba = b
+                break
+        for w in ["小雨", "雨", "曇", "晴", "雪"]:
+            if w in txt:
+                weather = w
+                break
 
-    # ワイド払戻
-    wide_rows = []
-    for table in soup.find_all("table", class_="Payout_Detail_Table"):
-        for tr in table.find_all("tr"):
-            th = tr.find("th")
-            if not th or "ワイド" not in th.get_text():
-                continue
-            tds = tr.find_all("td")
-            if len(tds) < 3:
-                continue
-            horse_spans = [s.get_text(strip=True) for s in tds[0].find_all("span")]
-            pays = re.findall(r'[\d,]+(?=円)', tds[1].get_text())
-            ninkis = re.findall(r'(\d+)(?=人気)', tds[2].get_text())
-            for i in range(0, len(horse_spans) - 1, 2):
-                idx = i // 2
-                combo = f"{horse_spans[i]}-{horse_spans[i+1]}"
-                pay = pays[idx].replace(",", "") if idx < len(pays) else ""
-                ninki = ninkis[idx] if idx < len(ninkis) else ""
-                wide_rows.append({"combo": combo, "ninki": ninki, "pay": pay})
+    races = []
 
-    return {"weather": weather, "baba": baba, "wide": wide_rows}
+    # div.roundWrapper ごとにレースが入っている
+    for div in soup.find_all("div", class_="roundWrapper"):
+        txt = div.get_text()
+        m = re.match(r'\s*(\d+)R', txt)
+        if not m:
+            continue
+        race_no = int(m.group(1))
+
+        # refundテーブルからワイドを取得
+        in_wide = False
+        for table in div.find_all("table", class_="refund"):
+            for tr in table.find_all("tr"):
+                th = tr.find("th")
+                tds = tr.find_all("td")
+                if th:
+                    in_wide = "ワイド" in th.get_text()
+                if not in_wide or len(tds) < 2:
+                    continue
+                combo = tds[0].get_text(strip=True)
+                pay = re.sub(r'[^\d]', '', tds[1].get_text())
+                ninki = ""
+                if len(tds) >= 3:
+                    nm = re.search(r'(\d+)', tds[2].get_text())
+                    if nm:
+                        ninki = nm.group(1)
+                if combo and pay:
+                    races.append({"race_no": race_no, "combo": combo, "ninki": ninki, "pay": pay})
+
+    return {"baba": baba, "weather": weather, "races": races}
 
 
 def collect_day(target_date, log):
-    d = target_date.replace("-", "")
-    year, mmdd = d[:4], d[4:]
+    date_fmt = target_date.replace("-", "%2F")  # keiba.go.jp形式 2026%2F07%2F03
     out_dir = os.path.join(DATA_DIR, target_date)
     os.makedirs(out_dir, exist_ok=True)
 
     for venue_name, code in VENUE_CODES.items():
-        race_rows = []
-        venue_ok = False
-        log.append(f"🔍 {venue_name} 確認中...")
-        for r in range(1, 13):
-            race_id = f"{year}{code}{mmdd}{r:02d}"
-            url = f"https://nar.netkeiba.com/race/result.html?race_id={race_id}"
-            try:
-                html = fetch_html(url)
-                result = parse_race(html)
-                if not result["wide"]:
-                    continue
-                venue_ok = True
-                baba = result["baba"]
-                weather = result["weather"]
-                for w in result["wide"]:
-                    if w["ninki"] and w["pay"]:
-                        race_rows.append([
-                            target_date, baba, weather,
-                            str(r), w["combo"], w["ninki"], w["pay"]
-                        ])
-            except Exception as e:
-                log.append(f"  ⚠️ R{r:02d} エラー: {e}")
-
-        if venue_ok and race_rows:
-            csv_path = os.path.join(out_dir, f"{venue_name}.csv")
-            with open(csv_path, "w", encoding="utf-8", newline="") as f:
-                writer = csv.writer(f)
-                writer.writerow(["日付", "馬場状態", "天候", "R", "組み合わせ", "人気", "配当円"])
-                writer.writerows(race_rows)
-            log.append(f"✅ {venue_name}: {len(race_rows)//3}R 保存")
-        else:
-            log.append(f"⏭ {venue_name}: 開催なし")
+        url = f"https://www.keiba.go.jp/KeibaWeb/TodayRaceInfo/RefundMoneyList?k_raceDate={date_fmt}&k_babaCode={code}"
+        try:
+            html = fetch_html(url)
+            result = parse_venue_day(html)
+            if not result["races"]:
+                log.append(f"⏭ {venue_name}: 開催なし")
+                continue
+            baba = result["baba"]
+            weather = result["weather"]
+            race_rows = [
+                [target_date, baba, weather, str(r["race_no"]), r["combo"], r["ninki"], r["pay"]]
+                for r in result["races"] if r["ninki"] and r["pay"]
+            ]
+            if race_rows:
+                csv_path = os.path.join(out_dir, f"{venue_name}.csv")
+                with open(csv_path, "w", encoding="utf-8", newline="") as f:
+                    writer = csv.writer(f)
+                    writer.writerow(["日付", "馬場状態", "天候", "R", "組み合わせ", "人気", "配当円"])
+                    writer.writerows(race_rows)
+                num_races = len(set(r["race_no"] for r in result["races"]))
+                log.append(f"✅ {venue_name}: {num_races}R 保存")
+            else:
+                log.append(f"⏭ {venue_name}: データなし")
+        except Exception as e:
+            log.append(f"⏭ {venue_name}: {e}")
 
 
 def run_collect(target_date):
