@@ -91,7 +91,12 @@ def recommend(stats):
 # ── スクレイピング ────────────────────────────────────
 
 def fetch_html(url, timeout=12):
-    req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0 (Macintosh)"})
+    req = urllib.request.Request(url, headers={
+        "User-Agent": "Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1",
+        "Referer": "https://nar.netkeiba.com/",
+        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+        "Accept-Language": "ja,en-US;q=0.7,en;q=0.3",
+    })
     with urllib.request.urlopen(req, timeout=timeout) as res:
         return res.read().decode("utf-8", errors="replace")
 
@@ -247,9 +252,14 @@ def api_venues():
 def api_summary():
     days = request.args.get("days", type=int)
     today_only = request.args.get("today") == "1"
+    meetings = request.args.get("meetings", type=int)  # 競馬場ごとの直近N開催日
     rows = load_all_data(days=days, today_only=today_only)
     if not rows:
         return jsonify({"error": "データなし"})
+    # meetingsモード: 全体は全データの直近N開催日、競馬場別は各場の直近N日
+    if meetings:
+        all_dates = sorted(set(r['日付'] for r in rows), reverse=True)[:meetings]
+        rows = [r for r in rows if r['日付'] in set(all_dates)]
 
     # 全体おすすめ
     overall_stats = calc_stats(rows)
@@ -260,6 +270,9 @@ def api_summary():
     venue_recs = []
     for v in sorted(venues):
         vrows = [r for r in rows if r['競馬場'] == v]
+        if meetings:
+            vdates = sorted(set(r['日付'] for r in vrows), reverse=True)[:meetings]
+            vrows = [r for r in vrows if r['日付'] in set(vdates)]
         vstats = calc_stats(vrows)
         vrec = recommend(vstats)
         if vrec:
