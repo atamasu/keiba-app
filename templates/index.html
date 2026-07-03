@@ -650,13 +650,19 @@ async function loadRecent() {
   const el = document.getElementById('recent-list');
   const data = await fetch(API+'/api/recent').then(r=>r.json()).catch(()=>[]);
   if (!data.length) { el.innerHTML = '<p style="color:#4a5a4a;padding:10px">データなし</p>'; return; }
-  el.innerHTML = '<div class="recent-list">' + data.map(d =>
-    `<div class="recent-item">
+  el.innerHTML = '<div class="recent-list">' + data.map(d => {
+    const hasResult = d.result_count > 0;
+    const badge = hasResult
+      ? `<span style="font-size:10px;background:#dcfce7;color:#16a34a;border-radius:4px;padding:2px 6px;margin-left:4px;font-weight:700">複勝✓</span>`
+      : `<span style="font-size:10px;background:#f3f4f6;color:#9ca3af;border-radius:4px;padding:2px 6px;margin-left:4px">複勝なし</span>`;
+    return `<div class="recent-item">
       <div class="recent-date">${d.date}</div>
-      <div class="recent-venues">${d.venues.join('・')}</div>
+      <div class="recent-venues" style="flex:1">
+        ${d.venues.join('・')}${badge}
+      </div>
       <div class="recent-count">${d.venues.length}場</div>
-    </div>`
-  ).join('') + '</div>';
+    </div>`;
+  }).join('') + '</div>';
 }
 
 // ── 総合おすすめ ──────────────────────────────
@@ -1302,13 +1308,17 @@ async function loadHistory() {
   const el = document.getElementById('history-list');
   const data = await fetch(API+'/api/recent').then(r=>r.json()).catch(()=>[]);
   if (!data.length) { el.innerHTML = '<p style="color:#4a5a4a">データなし</p>'; return; }
-  el.innerHTML = '<div class="recent-list">' + data.map(d =>
-    `<div class="recent-item">
+  el.innerHTML = '<div class="recent-list">' + data.map(d => {
+    const hasResult = d.result_count > 0;
+    const badge = hasResult
+      ? `<span style="font-size:10px;background:#dcfce7;color:#16a34a;border-radius:4px;padding:2px 6px;margin-left:4px;font-weight:700">複勝✓</span>`
+      : `<span style="font-size:10px;background:#f3f4f6;color:#9ca3af;border-radius:4px;padding:2px 6px;margin-left:4px">複勝なし</span>`;
+    return `<div class="recent-item">
       <div class="recent-date">${d.date}</div>
-      <div class="recent-venues">${d.venues.join(' / ')}</div>
+      <div class="recent-venues" style="flex:1">${d.venues.join(' / ')}${badge}</div>
       <div class="recent-count">${d.venues.length}場</div>
-    </div>`
-  ).join('') + '</div>';
+    </div>`;
+  }).join('') + '</div>';
 }
 
 loadRecent();

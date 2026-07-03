@@ -811,9 +811,14 @@ def api_recent():
         d = os.path.basename(folder)
         if not re.match(r'^\d{4}-\d{2}-\d{2}$', d):
             continue
-        venues = [os.path.splitext(os.path.basename(f))[0]
-                  for f in glob.glob(f"{folder}/*.csv")]
-        result.append({"date": d, "venues": sorted(venues)})
+        all_csvs = glob.glob(f"{folder}/*.csv")
+        venues = sorted([
+            os.path.splitext(os.path.basename(f))[0]
+            for f in all_csvs
+            if not os.path.basename(f).endswith("_result.csv")
+        ])
+        result_count = sum(1 for f in all_csvs if os.path.basename(f).endswith("_result.csv"))
+        result.append({"date": d, "venues": venues, "result_count": result_count})
     return jsonify(result)
 
 
