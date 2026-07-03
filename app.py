@@ -155,8 +155,9 @@ def parse_venue_day(html):
                 tds = tr.find_all("td")
                 if th:
                     th_txt = th.get_text(strip=True)
-                    in_wide = "ワイド" in th_txt
-                    in_fuku = "複勝" in th_txt
+                    if th_txt:  # 空th行ではフラグをリセットしない（続きの行が消える）
+                        in_wide = "ワイド" in th_txt
+                        in_fuku = "複勝" in th_txt
 
                 # ワイド
                 if in_wide and len(tds) >= 2:
@@ -180,13 +181,14 @@ def parse_venue_day(html):
 
         if fuku_entries:
             entry = {"race_no": race_no}
+            waku_map = {c: w for c, w in waku_list}
             for i, fe in enumerate(fuku_entries[:3], 1):
                 entry[f"馬番{i}"] = fe["umaban"]
                 entry[f"人気{i}"] = fe["ninki"]
-                # 枠番を着順から対応付け
-                waku_map = {c: w for c, w in waku_list}
                 entry[f"枠{i}"] = waku_map.get(str(i), "")
-            entry["頭数"] = total_horses
+            # ページには上位3頭しか表示されないため馬番最大値を頭数下限として使用
+            max_ub = max((int(fe["umaban"]) for fe in fuku_entries if fe["umaban"].isdigit()), default=0)
+            entry["頭数"] = max_ub
             results.append(entry)
 
     return {"baba": baba, "weather": weather, "races": races, "results": results}
