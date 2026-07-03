@@ -33,7 +33,7 @@ def load_all_data(venue=None, days=None, today_only=False):
     if today_only:
         cutoff = today_str
     elif days:
-        cutoff = (date.today() - timedelta(days=days)).isoformat()
+        cutoff = (date.today() - timedelta(days=days-1)).isoformat()
     for f in sorted(glob.glob(f"{DATA_DIR}/**/*.csv", recursive=True)):
         parent = os.path.basename(os.path.dirname(f))
         if not re.match(r'^\d{4}-\d{2}-\d{2}$', parent):
