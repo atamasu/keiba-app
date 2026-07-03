@@ -484,6 +484,8 @@ let currentDays = 'meetings3';
 let currentAnalysisDays = null;
 let currentToday = false;
 let collectPolling = null;
+let currentFieldSize = null;
+let todayLiveInterval = null;
 
 function showTab(name) {
   ['collect','summary','analysis','races','history'].forEach(t => {
@@ -769,13 +771,29 @@ async function loadSummary() {
         <div class="summary-grid">${venueHtmlRate || '<p style="color:#4a5a4a">データ不足</p>'}</div>
       </div>
     </div>
+    <div class="card" id="venue-today-live-card">
+      <div class="summary-section">
+        <h3>⚡ 今日の進行状況（リアルタイム）</h3>
+        <div id="today-live-area"><div class="loading-center" style="font-size:12px">読み込み中...</div></div>
+      </div>
+    </div>
     <div class="card" id="venue-today-card">
       <div class="summary-section">
-        <h3>🏇 競馬場別 本日の出現傾向</h3>
+        <h3>🏇 競馬場別 出現傾向</h3>
+        <div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:10px">
+          <button onclick="setFieldSize(null,this)" style="padding:6px 12px;border-radius:16px;border:1px solid #dde3ef;background:#1d4ed8;color:#fff;font-size:12px;font-weight:700;cursor:pointer" id="fs-all">全頭数</button>
+          <button onclick="setFieldSize('small',this)" style="padding:6px 12px;border-radius:16px;border:1px solid #dde3ef;background:#f0f4ff;color:#8a9ab8;font-size:12px;font-weight:700;cursor:pointer" id="fs-small">少頭数(〜8頭)</button>
+          <button onclick="setFieldSize('medium',this)" style="padding:6px 12px;border-radius:16px;border:1px solid #dde3ef;background:#f0f4ff;color:#8a9ab8;font-size:12px;font-weight:700;cursor:pointer" id="fs-medium">中頭数(9-12頭)</button>
+          <button onclick="setFieldSize('large',this)" style="padding:6px 12px;border-radius:16px;border:1px solid #dde3ef;background:#f0f4ff;color:#8a9ab8;font-size:12px;font-weight:700;cursor:pointer" id="fs-large">多頭数(13頭〜)</button>
+        </div>
         <div id="venue-today-area"><div class="loading-center" style="font-size:12px">読み込み中...</div></div>
       </div>
     </div>`;
+  loadTodayLive();
   loadVenueToday();
+  // 5分ごとに今日のライブデータを自動更新
+  if (todayLiveInterval) clearInterval(todayLiveInterval);
+  todayLiveInterval = setInterval(loadTodayLive, 5 * 60 * 1000);
 }
 
 // ── 回収率分析 ────────────────────────────────
@@ -1159,7 +1177,7 @@ async function loadRaces() {
     </div>`;
 }
 
-// ── 収集履歴 ─────────────────────────────────
+// ── 競馬場別出現傾向 ──────────────────────────
 async function loadVenueToday() {
   const el = document.getElementById('venue-today-area');
   if (!el) return;
@@ -1167,6 +1185,7 @@ async function loadVenueToday() {
   if (currentToday) params.set('today', '1');
   else if (currentDays === 'meetings3') params.set('meetings', '3');
   else if (currentDays) params.set('days', currentDays);
+  if (currentFieldSize) params.set('field_size', currentFieldSize);
   const data = await fetch(API+'/api/venue_analysis?' + params.toString()).then(r=>r.json()).catch(()=>null);
   if (!data || !data.length) {
     el.innerHTML = '<p style="color:#4a5a4a;font-size:12px">データなし（本日のデータ回収後に表示されます）</p>';
@@ -1189,11 +1208,12 @@ async function loadVenueToday() {
   };
 
   el.innerHTML = data.map(v => {
-    const umaHtml      = v.top_umaban.map(u => chip(`馬番${u.umaban} ${u.rate}%`, '#1d4ed8')).join('');
-    const umaPairHtml  = (v.top_umaban_pairs||[]).map(p => chip(`馬番${p.pair} ${p.rate}%`, '#1e40af')).join('');
-    const ninkiHtml    = v.top_ninki.map(n => chip(`${n.ninki}人気 ${n.rate}%`, '#0f766e')).join('');
-    const ninkiPairHtml= (v.top_ninki_pairs||[]).map(p => chip(`${p.pair}人気 ${p.rate}%`, '#7c3aed')).join('');
-    const wakuHtml     = (v.top_waku||[]).map(w => wakuChip(w.waku, `${w.rate}%`)).join('');
+    const T = v.total_races;
+    const umaHtml      = v.top_umaban.map(u => chip(`馬番${u.umaban} ${u.count}/${T}R (${u.rate}%)`, '#1d4ed8')).join('');
+    const umaPairHtml  = (v.top_umaban_pairs||[]).map(p => chip(`馬番${p.pair} ${p.count}/${T}R (${p.rate}%)`, '#1e40af')).join('');
+    const ninkiHtml    = v.top_ninki.map(n => chip(`${n.ninki}人気 ${n.count}/${T}R (${n.rate}%)`, '#0f766e')).join('');
+    const ninkiPairHtml= (v.top_ninki_pairs||[]).map(p => chip(`${p.pair}人気 ${p.count}/${T}R (${p.rate}%)`, '#7c3aed')).join('');
+    const wakuHtml     = (v.top_waku||[]).map(w => wakuChip(w.waku, `${w.count}/${T}R (${w.rate}%)`)).join('');
     const wakuPairHtml = (v.top_waku_pairs||[]).map(p => {
       const [a,b] = p.pair.split('-');
       const stA = WAKU_STYLE[a]||'background:#666;color:#fff';
@@ -1203,7 +1223,7 @@ async function loadVenueToday() {
         <span style="${stA};border-radius:4px;padding:2px 6px;font-size:11px;font-weight:700">${a}(${nA})</span>
         <span style="font-size:11px;color:#666">-</span>
         <span style="${stB};border-radius:4px;padding:2px 6px;font-size:11px;font-weight:700">${b}(${nB})</span>
-        <span style="font-size:11px;color:#666">${p.rate}%</span>
+        <span style="font-size:11px;color:#666">${p.count}/${T}R (${p.rate}%)</span>
       </span>`;
     }).join('');
     const starHtml = v.star && v.star.length
@@ -1212,7 +1232,7 @@ async function loadVenueToday() {
            <span style="font-size:12px;color:#fff">${v.star.join('　')}</span>
          </div>` : '';
     return `<div style="border:1px solid #e2e8f0;border-radius:10px;padding:10px;margin-bottom:8px">
-      <div style="font-weight:700;margin-bottom:6px;font-size:13px">🏟 ${v.venue}（${v.total_races}R分析）</div>
+      <div style="font-weight:700;margin-bottom:6px;font-size:13px">🏟 ${v.venue}（${v.total_races}R分析）${v.field_dist && (v.field_dist.small||v.field_dist.medium||v.field_dist.large) ? ` <span style="font-size:10px;color:#8a9ab8;font-weight:400">少${v.field_dist.small||0}/中${v.field_dist.medium||0}/多${v.field_dist.large||0}</span>` : ''}</div>
       <div style="margin-bottom:4px"><span style="font-size:11px;color:#64748b">🐴 当たりやすい馬番：</span><br>${umaHtml||'-'}</div>
       <div style="margin-bottom:4px"><span style="font-size:11px;color:#64748b">🎫 おすすめ馬番ワイド：</span><br>${umaPairHtml||'-'}</div>
       <div style="margin-bottom:4px"><span style="font-size:11px;color:#64748b">🎯 当たりやすい人気：</span><br>${ninkiHtml||'-'}</div>
@@ -1222,6 +1242,60 @@ async function loadVenueToday() {
       ${starHtml}
     </div>`;
   }).join('');
+}
+
+function setFieldSize(size, btn) {
+  currentFieldSize = size;
+  document.querySelectorAll('#fs-all,#fs-small,#fs-medium,#fs-large').forEach(b => {
+    b.style.background = '#f0f4ff';
+    b.style.color = '#8a9ab8';
+    b.style.borderColor = '#dde3ef';
+  });
+  if (btn) {
+    btn.style.background = '#1d4ed8';
+    btn.style.color = '#fff';
+    btn.style.borderColor = '#1d4ed8';
+  }
+  loadVenueToday();
+}
+
+async function loadTodayLive() {
+  const el = document.getElementById('today-live-area');
+  if (!el) return;
+  const WAKU_STYLE = {
+    '1':'background:#eee;color:#333', '2':'background:#222;color:#fff',
+    '3':'background:#e11d48;color:#fff', '4':'background:#1d4ed8;color:#fff',
+    '5':'background:#ca8a04;color:#fff', '6':'background:#16a34a;color:#fff',
+    '7':'background:#ea580c;color:#fff', '8':'background:#db2777;color:#fff',
+  };
+  const WAKU_NAME = {'1':'白','2':'黒','3':'赤','4':'青','5':'黄','6':'緑','7':'橙','8':'桃'};
+  const data = await fetch(API+'/api/today_live').then(r=>r.json()).catch(()=>null);
+  if (!data || !data.venues.length) {
+    el.innerHTML = '<p style="color:#8a9ab8;font-size:12px;padding:8px">本日の進行データなし（データ回収後に表示）</p>';
+    return;
+  }
+  const now = new Date();
+  const timeStr = `${now.getHours()}:${String(now.getMinutes()).padStart(2,'0')}`;
+  el.innerHTML = `<div style="font-size:11px;color:#b0bcd0;margin-bottom:8px">最終更新: ${timeStr}（5分ごと自動更新）</div>` +
+    data.venues.map(v => {
+      const umaChips = v.hot_umaban.map(u =>
+        `<span style="display:inline-block;background:#1d4ed8;color:#fff;border-radius:5px;padding:2px 8px;margin:2px;font-size:11px;font-weight:700">馬番${u.val} ${u.count}/${v.completed_races}R(${u.rate}%)</span>`
+      ).join('');
+      const nkChips = v.hot_ninki.map(n =>
+        `<span style="display:inline-block;background:#0f766e;color:#fff;border-radius:5px;padding:2px 8px;margin:2px;font-size:11px;font-weight:700">${n.val}人気 ${n.count}/${v.completed_races}R(${n.rate}%)</span>`
+      ).join('');
+      const wkChips = v.hot_waku.map(w => {
+        const st = WAKU_STYLE[w.val] || 'background:#666;color:#fff';
+        const nm = WAKU_NAME[w.val] || w.val;
+        return `<span style="display:inline-block;${st};border-radius:5px;padding:2px 8px;margin:2px;font-size:11px;font-weight:700">${w.val}枠(${nm}) ${w.count}/${v.completed_races}R(${w.rate}%)</span>`;
+      }).join('');
+      return `<div style="border:1px solid #e2e8f0;border-radius:8px;padding:8px 10px;margin-bottom:6px">
+        <div style="font-weight:700;font-size:13px;margin-bottom:4px">🏟 ${v.venue} <span style="font-size:11px;color:#16a34a;font-weight:400">${v.completed_races}R完了</span></div>
+        <div style="margin-bottom:3px"><span style="font-size:10px;color:#64748b">🐴 熱い馬番：</span>${umaChips||'-'}</div>
+        <div style="margin-bottom:3px"><span style="font-size:10px;color:#64748b">🎯 熱い人気：</span>${nkChips||'-'}</div>
+        <div><span style="font-size:10px;color:#64748b">🎨 熱い枠色：</span>${wkChips||'-'}</div>
+      </div>`;
+    }).join('');
 }
 
 async function loadHistory() {

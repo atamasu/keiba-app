@@ -1,0 +1,12 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "keiba-app",
+      "runtimeExecutable": "python3",
+      "runtimeArgs": ["/Users/hagiharadaiki/Desktop/keiba-app/app.py"],
+      "cwd": "/Users/hagiharadaiki/Desktop/keiba-app",
+      "port": 5050
+    }
+  ]
+}

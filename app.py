@@ -130,18 +130,21 @@ def parse_venue_day(html):
             continue
         race_no = int(m.group(1))
 
-        # raceResultから枠番を取得（着順1〜3位の枠）
+        # raceResultから枠番・総頭数を取得
         waku_list = []
+        total_horses = 0
         for table in div.find_all("table", class_="raceResult"):
-            for tr in table.find_all("tr"):
+            horse_rows = [tr for tr in table.find_all("tr") if tr.find_all("td")]
+            total_horses = len(horse_rows)
+            for tr in horse_rows:
                 tds = tr.find_all("td")
                 if len(tds) >= 3:
                     chakujun = tds[0].get_text(strip=True)
                     waku = tds[1].get_text(strip=True)
                     if chakujun in ("1", "2", "3") and re.match(r'^\d+$', waku):
                         waku_list.append((chakujun, waku))
-            if waku_list:
-                break  # 最初のraceResultテーブルだけ使う
+            if horse_rows:
+                break
 
         fuku_entries = []
         for table in div.find_all("table", class_="refund"):
@@ -183,6 +186,7 @@ def parse_venue_day(html):
                 # 枠番を着順から対応付け
                 waku_map = {c: w for c, w in waku_list}
                 entry[f"枠{i}"] = waku_map.get(str(i), "")
+            entry["頭数"] = total_horses
             results.append(entry)
 
     return {"baba": baba, "weather": weather, "races": races, "results": results}
@@ -222,13 +226,14 @@ def collect_day(target_date, log):
                 res_path = os.path.join(out_dir, f"{venue_name}_result.csv")
                 with open(res_path, "w", encoding="utf-8", newline="") as f:
                     writer = csv.writer(f)
-                    writer.writerow(["日付", "競馬場", "R", "馬番1", "人気1", "枠1", "馬番2", "人気2", "枠2", "馬番3", "人気3", "枠3"])
+                    writer.writerow(["日付", "競馬場", "R", "馬番1", "人気1", "枠1", "馬番2", "人気2", "枠2", "馬番3", "人気3", "枠3", "頭数"])
                     for r in result["results"]:
                         writer.writerow([
                             target_date, venue_name, r["race_no"],
                             r.get("馬番1",""), r.get("人気1",""), r.get("枠1",""),
                             r.get("馬番2",""), r.get("人気2",""), r.get("枠2",""),
                             r.get("馬番3",""), r.get("人気3",""), r.get("枠3",""),
+                            r.get("頭数",""),
                         ])
         except Exception as e:
             log.append(f"⏭ {venue_name}: {e}")
@@ -540,34 +545,34 @@ def api_trend():
     return jsonify(calc_trend(rows, target_pops))
 
 
-@app.route("/api/venue_analysis")
-def api_venue_analysis():
-    """競馬場別 馬番・人気の出現率（複勝データ使用）"""
-    days = request.args.get("days", type=int)
-    today_only = request.args.get("today") == "1"
-    meetings = request.args.get("meetings", type=int)
-
-    today_str = date.today().isoformat()
-    if today_only:
-        cutoff = today_str
-    elif days:
-        cutoff = (date.today() - timedelta(days=days - 1)).isoformat()
-    else:
-        cutoff = None
-
+def load_venue_results(venues_filter=None, date_filter=None, field_size=None):
+    """_result.csvを読み込んで競馬場別に集計する"""
     result = {}
     for csv_path in sorted(glob.glob(f"{DATA_DIR}/**/*_result.csv", recursive=True)):
         parent = os.path.basename(os.path.dirname(csv_path))
         if not re.match(r'^\d{4}-\d{2}-\d{2}$', parent):
             continue
-        if today_only and parent != today_str:
+        if date_filter and parent not in date_filter:
             continue
-        if cutoff and not today_only and parent < cutoff:
+        fname = os.path.basename(csv_path)
+        v = fname.replace("_result.csv", "")
+        if venues_filter and v not in venues_filter:
             continue
         try:
             with open(csv_path, encoding="utf-8") as f:
                 for row in csv.DictReader(f):
-                    v = row.get("競馬場", "")
+                    # 頭数フィルター
+                    try:
+                        heads = int(row.get("頭数") or 0)
+                    except:
+                        heads = 0
+                    if field_size and heads > 0:
+                        if field_size == "small" and heads > 8:
+                            continue
+                        elif field_size == "medium" and (heads < 9 or heads > 12):
+                            continue
+                        elif field_size == "large" and heads < 13:
+                            continue
                     if v not in result:
                         result[v] = {
                             "dates": set(),
@@ -577,141 +582,138 @@ def api_venue_analysis():
                             "ninki_pairs": defaultdict(int),
                             "umaban_pairs": defaultdict(int),
                             "waku_pairs": defaultdict(int),
+                            "field_dist": defaultdict(int),
                             "total": 0,
                         }
                     result[v]["dates"].add(parent)
                     result[v]["total"] += 1
-                    ninkis = []
+                    if heads > 0:
+                        if heads <= 8:
+                            result[v]["field_dist"]["small"] += 1
+                        elif heads <= 12:
+                            result[v]["field_dist"]["medium"] += 1
+                        else:
+                            result[v]["field_dist"]["large"] += 1
+                    nkl = []
                     for i in range(1, 4):
                         ub = row.get(f"馬番{i}", "")
                         nk = row.get(f"人気{i}", "")
-                        if ub:
-                            result[v]["umaban"][ub] += 1
+                        if ub: result[v]["umaban"][ub] += 1
                         if nk:
                             result[v]["ninki"][nk] += 1
-                            ninkis.append(int(nk))
-                    # 人気ペア
-                    ninkis_sorted = sorted(set(ninkis))
-                    for a in range(len(ninkis_sorted)):
-                        for b in range(a + 1, len(ninkis_sorted)):
-                            result[v]["ninki_pairs"][f"{ninkis_sorted[a]}-{ninkis_sorted[b]}"] += 1
-                    # 馬番ペア
-                    ubans = []
+                            try: nkl.append(int(nk))
+                            except: pass
+                    nkl_s = sorted(set(nkl))
+                    for a in range(len(nkl_s)):
+                        for b in range(a+1, len(nkl_s)):
+                            result[v]["ninki_pairs"][f"{nkl_s[a]}-{nkl_s[b]}"] += 1
+                    ubl = []
                     for i in range(1, 4):
                         ub = row.get(f"馬番{i}", "")
                         if ub:
-                            ubans.append(int(ub))
-                    ubans_sorted = sorted(set(ubans))
-                    for a in range(len(ubans_sorted)):
-                        for b in range(a + 1, len(ubans_sorted)):
-                            result[v]["umaban_pairs"][f"{ubans_sorted[a]}-{ubans_sorted[b]}"] += 1
-                    # 枠番・枠ペア
-                    wakus = []
+                            try: ubl.append(int(ub))
+                            except: pass
+                    ubl_s = sorted(set(ubl))
+                    for a in range(len(ubl_s)):
+                        for b in range(a+1, len(ubl_s)):
+                            result[v]["umaban_pairs"][f"{ubl_s[a]}-{ubl_s[b]}"] += 1
+                    wkl = []
                     for i in range(1, 4):
-                        wk = row.get(f"枠{i}", "")
-                        if wk:
-                            result[v]["waku"][wk] += 1
-                            wakus.append(int(wk))
-                    wakus_sorted = sorted(set(wakus))
-                    for a in range(len(wakus_sorted)):
-                        for b in range(a + 1, len(wakus_sorted)):
-                            result[v]["waku_pairs"][f"{wakus_sorted[a]}-{wakus_sorted[b]}"] += 1
+                        wkv = row.get(f"枠{i}", "")
+                        if wkv:
+                            result[v]["waku"][wkv] += 1
+                            try: wkl.append(int(wkv))
+                            except: pass
+                    wkl_s = sorted(set(wkl))
+                    for a in range(len(wkl_s)):
+                        for b in range(a+1, len(wkl_s)):
+                            result[v]["waku_pairs"][f"{wkl_s[a]}-{wkl_s[b]}"] += 1
         except Exception:
             pass
+    return result
+
+
+@app.route("/api/venue_analysis")
+def api_venue_analysis():
+    """競馬場別 馬番・人気・枠の出現率（複勝データ使用）"""
+    days = request.args.get("days", type=int)
+    today_only = request.args.get("today") == "1"
+    meetings = request.args.get("meetings", type=int)
+    field_size = request.args.get("field_size")  # small/medium/large
+
+    today_str = date.today().isoformat()
+    if today_only:
+        date_filter = {today_str}
+    elif days:
+        cutoff = (date.today() - timedelta(days=days - 1)).isoformat()
+        date_filter = None  # will filter by cutoff below
+    else:
+        date_filter = None
+
+    # 全データ読み込み（meetings用に一旦全部取る）
+    all_data = load_venue_results(field_size=field_size)
 
     out = []
-    for venue, d in result.items():
-        total = d["total"]
-        if meetings:
-            # meetings指定時は直近N開催日分に絞る
-            dates_sorted = sorted(d["dates"], reverse=True)[:meetings]
-            dates_set = set(dates_sorted)
-            # 絞り直し
-            um2 = defaultdict(int)
-            nk2 = defaultdict(int)
-            wk2 = defaultdict(int)
-            np2 = defaultdict(int)
-            up2 = defaultdict(int)
-            wp2 = defaultdict(int)
-            tot2 = 0
-            for csv_path2 in glob.glob(f"{DATA_DIR}/**/{venue}_result.csv", recursive=True):
-                parent2 = os.path.basename(os.path.dirname(csv_path2))
-                if parent2 not in dates_set:
-                    continue
-                try:
-                    with open(csv_path2, encoding="utf-8") as f2:
-                        for row in csv.DictReader(f2):
-                            tot2 += 1
-                            nkl = []
-                            for i in range(1, 4):
-                                ub = row.get(f"馬番{i}", "")
-                                nk = row.get(f"人気{i}", "")
-                                if ub: um2[ub] += 1
-                                if nk:
-                                    nk2[nk] += 1
-                                    nkl.append(int(nk))
-                            nkl_s = sorted(set(nkl))
-                            for a in range(len(nkl_s)):
-                                for b in range(a + 1, len(nkl_s)):
-                                    np2[f"{nkl_s[a]}-{nkl_s[b]}"] += 1
-                            ubl = []
-                            for i in range(1, 4):
-                                ub = row.get(f"馬番{i}", "")
-                                if ub: ubl.append(int(ub))
-                            ubl_s = sorted(set(ubl))
-                            for a in range(len(ubl_s)):
-                                for b in range(a + 1, len(ubl_s)):
-                                    up2[f"{ubl_s[a]}-{ubl_s[b]}"] += 1
-                            wkl = []
-                            for i in range(1, 4):
-                                wk = row.get(f"枠{i}", "")
-                                if wk:
-                                    wk2[wk] += 1
-                                    wkl.append(int(wk))
-                            wkl_s = sorted(set(wkl))
-                            for a in range(len(wkl_s)):
-                                for b in range(a + 1, len(wkl_s)):
-                                    wp2[f"{wkl_s[a]}-{wkl_s[b]}"] += 1
-                except Exception:
-                    pass
-            umaban_cnt = um2
-            ninki_cnt = nk2
-            waku_cnt = wk2
-            ninki_pairs_cnt = np2
-            umaban_pairs_cnt = up2
-            waku_pairs_cnt = wp2
-            total = tot2 or total
+    for venue, d in sorted(all_data.items()):
+        # 日付絞り込み
+        if today_only:
+            use_dates = {today_str} & d["dates"]
+        elif days:
+            cutoff = (date.today() - timedelta(days=days - 1)).isoformat()
+            use_dates = {dt for dt in d["dates"] if dt >= cutoff}
+        elif meetings:
+            use_dates = set(sorted(d["dates"], reverse=True)[:meetings])
         else:
-            umaban_cnt = d["umaban"]
-            ninki_cnt = d["ninki"]
-            waku_cnt = d["waku"]
-            ninki_pairs_cnt = d["ninki_pairs"]
-            umaban_pairs_cnt = d["umaban_pairs"]
-            waku_pairs_cnt = d["waku_pairs"]
+            use_dates = d["dates"]
+
+        if not use_dates:
+            continue
+
+        # 絞り込み後の集計
+        if use_dates == d["dates"]:
+            # 全部使う場合はそのまま
+            um = d["umaban"]
+            nk = d["ninki"]
+            wk = d["waku"]
+            np_ = d["ninki_pairs"]
+            up_ = d["umaban_pairs"]
+            wp_ = d["waku_pairs"]
+            fd = d["field_dist"]
+            total = d["total"]
+        else:
+            filtered = load_venue_results(venues_filter={venue}, date_filter=use_dates, field_size=field_size)
+            if venue not in filtered:
+                continue
+            fd2 = filtered[venue]
+            um = fd2["umaban"]
+            nk = fd2["ninki"]
+            wk = fd2["waku"]
+            np_ = fd2["ninki_pairs"]
+            up_ = fd2["umaban_pairs"]
+            wp_ = fd2["waku_pairs"]
+            fd = fd2["field_dist"]
+            total = fd2["total"]
 
         if total == 0:
             continue
 
-        top_umaban = sorted(umaban_cnt.items(), key=lambda x: -x[1])[:3]
-        top_ninki = sorted(ninki_cnt.items(), key=lambda x: -x[1])[:3]
-        top_waku = sorted(waku_cnt.items(), key=lambda x: -x[1])[:3]
-        top_ninki_pairs = sorted(ninki_pairs_cnt.items(), key=lambda x: -x[1])[:3]
-        top_umaban_pairs = sorted(umaban_pairs_cnt.items(), key=lambda x: -x[1])[:3]
-        top_waku_pairs = sorted(waku_pairs_cnt.items(), key=lambda x: -x[1])[:3]
+        top_umaban = sorted(um.items(), key=lambda x: -x[1])[:3]
+        top_ninki = sorted(nk.items(), key=lambda x: -x[1])[:3]
+        top_waku = sorted(wk.items(), key=lambda x: -x[1])[:3]
+        top_ninki_pairs = sorted(np_.items(), key=lambda x: -x[1])[:3]
+        top_umaban_pairs = sorted(up_.items(), key=lambda x: -x[1])[:3]
+        top_waku_pairs = sorted(wp_.items(), key=lambda x: -x[1])[:3]
 
-        # 激推し：出現率≥50%の馬番×人気 と 枠×人気 の組み合わせ
-        high_uma = sorted([k for k, c in umaban_cnt.items() if c / total >= 0.5],
-                          key=lambda x: -umaban_cnt[x])[:2]
-        high_nk  = sorted([k for k, c in ninki_cnt.items() if c / total >= 0.5],
-                          key=lambda x: -ninki_cnt[x])[:2]
-        high_wak = sorted([k for k, c in waku_cnt.items() if c / total >= 0.5],
-                          key=lambda x: -waku_cnt[x])[:2]
+        high_uma = sorted([k for k, c in um.items() if c / total >= 0.5], key=lambda x: -um[x])[:2]
+        high_nk  = sorted([k for k, c in nk.items() if c / total >= 0.5], key=lambda x: -nk[x])[:2]
+        high_wak = sorted([k for k, c in wk.items() if c / total >= 0.5], key=lambda x: -wk[x])[:2]
         star = [f"馬番{u}×{n}人気" for u in high_uma for n in high_nk][:3]
         star += [f"{w}枠×{n}人気" for w in high_wak for n in high_nk if f"{w}枠×{n}人気" not in star][:2]
 
         out.append({
             "venue": venue,
             "total_races": total,
+            "field_dist": dict(fd),
             "top_umaban": [{"umaban": k, "count": c, "rate": round(c / total * 100)} for k, c in top_umaban],
             "top_ninki": [{"ninki": k, "count": c, "rate": round(c / total * 100)} for k, c in top_ninki],
             "top_waku": [{"waku": k, "count": c, "rate": round(c / total * 100)} for k, c in top_waku],
@@ -720,8 +722,45 @@ def api_venue_analysis():
             "top_waku_pairs": [{"pair": k, "count": c, "rate": round(c / total * 100)} for k, c in top_waku_pairs],
             "star": star,
         })
-    out.sort(key=lambda x: x["venue"])
     return jsonify(out)
+
+
+@app.route("/api/today_live")
+def api_today_live():
+    """今日の進行状況をリアルタイムで返す"""
+    today = date.today().isoformat()
+    venues_data = []
+    for venue_name in sorted(VENUE_CODES.keys()):
+        result_path = os.path.join(DATA_DIR, today, f"{venue_name}_result.csv")
+        if not os.path.exists(result_path):
+            continue
+        try:
+            with open(result_path, encoding="utf-8") as f:
+                rows = list(csv.DictReader(f))
+            if not rows:
+                continue
+            um_count = defaultdict(int)
+            nk_count = defaultdict(int)
+            wk_count = defaultdict(int)
+            total = len(rows)
+            for row in rows:
+                for i in range(1, 4):
+                    ub = row.get(f"馬番{i}", "")
+                    nk = row.get(f"人気{i}", "")
+                    wkv = row.get(f"枠{i}", "")
+                    if ub: um_count[ub] += 1
+                    if nk: nk_count[nk] += 1
+                    if wkv: wk_count[wkv] += 1
+            venues_data.append({
+                "venue": venue_name,
+                "completed_races": total,
+                "hot_umaban": [{"val": k, "count": c, "rate": round(c/total*100)} for k, c in sorted(um_count.items(), key=lambda x: -x[1])[:3]],
+                "hot_ninki": [{"val": k, "count": c, "rate": round(c/total*100)} for k, c in sorted(nk_count.items(), key=lambda x: -x[1])[:3]],
+                "hot_waku": [{"val": k, "count": c, "rate": round(c/total*100)} for k, c in sorted(wk_count.items(), key=lambda x: -x[1])[:3]],
+            })
+        except Exception:
+            pass
+    return jsonify({"date": today, "venues": venues_data})
 
 
 @app.route("/api/upload_csv", methods=["POST"])
