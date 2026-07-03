@@ -404,28 +404,6 @@ def api_collect_status():
     return jsonify({"date": target, **info})
 
 
-@app.route("/api/collect/extend", methods=["POST"])
-def api_collect_extend():
-    """一番古いデータの1週間前を収集する"""
-    folders = sorted(glob.glob(f"{DATA_DIR}/202*"))
-    if not folders:
-        return jsonify({"status": "error", "message": "既存データなし"})
-
-    oldest = os.path.basename(folders[0])
-    oldest_date = date.fromisoformat(oldest)
-    targets = [(oldest_date - timedelta(days=i)).isoformat() for i in range(1, 8)]
-
-    def collect_all():
-        for d in reversed(targets):
-            if collect_status.get(d, {}).get("status") == "running":
-                continue
-            run_collect(d)
-
-    thread = threading.Thread(target=collect_all, daemon=True)
-    thread.start()
-    return jsonify({"status": "started", "oldest": oldest, "targets": list(reversed(targets))})
-
-
 @app.route("/api/collect/missing", methods=["POST"])
 def api_collect_missing():
     """過去7日間の未収集日をまとめて収集する"""
