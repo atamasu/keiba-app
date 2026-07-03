@@ -391,13 +391,17 @@
 
   <!-- 総合おすすめタブ -->
   <div id="tab-summary" style="display:none">
-    <div class="period-bar">
-      <div class="period-btn" onclick="selectPeriod('today', this)">今日</div>
-      <div class="period-btn active" onclick="selectPeriod(3, this)">直近3日</div>
-      <div class="period-btn" onclick="selectPeriod(7, this)">1週間</div>
-      <div class="period-btn" onclick="selectPeriod(14, this)">2週間</div>
-      <div class="period-btn" onclick="selectPeriod(null, this)">全期間</div>
+    <div style="display:flex;align-items:center;gap:8px;margin-bottom:12px">
+      <div class="period-bar" style="flex:1;margin-bottom:0">
+        <div class="period-btn" onclick="selectPeriod('today', this)">今日</div>
+        <div class="period-btn active" onclick="selectPeriod(3, this)">直近3日</div>
+        <div class="period-btn" onclick="selectPeriod(7, this)">1週間</div>
+        <div class="period-btn" onclick="selectPeriod(14, this)">2週間</div>
+        <div class="period-btn" onclick="selectPeriod(null, this)">全期間</div>
+      </div>
+      <button onclick="refreshToday(this)" style="flex-shrink:0;padding:10px 14px;border-radius:10px;background:linear-gradient(135deg,#1d4ed8,#2563eb);color:#fff;border:none;font-size:13px;font-weight:700;cursor:pointer">🔄</button>
     </div>
+    <div id="last-updated" style="text-align:right;font-size:11px;color:#b0bcd0;margin-bottom:8px"></div>
     <div id="summary-area"><div class="loading-center">読み込み中...</div></div>
   </div>
 
@@ -677,6 +681,22 @@ function roiBadge(roi) {
   return `<span class="badge badge-red">▼ ${roi}%</span>`;
 }
 
+async function refreshToday(btn) {
+  btn.disabled = true;
+  btn.textContent = '⏳';
+  const res = await fetch(API+'/api/collect', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({when:'today'})}).then(r=>r.json()).catch(()=>null);
+  if (!res) { btn.disabled=false; btn.textContent='🔄'; return; }
+  // poll until done
+  const today = new Date().toISOString().slice(0,10);
+  for (let i=0; i<60; i++) {
+    await new Promise(r=>setTimeout(r,3000));
+    const st = await fetch(API+'/api/collect/status?date='+today).then(r=>r.json()).catch(()=>null);
+    if (st && st.status !== 'running') break;
+  }
+  btn.disabled=false; btn.textContent='🔄';
+  loadSummary();
+}
+
 async function loadSummary() {
   const area = document.getElementById('summary-area');
   area.innerHTML = '<div class="loading-center"><div class="spinner" style="margin:0 auto 12px"></div><br>分析中...</div>';
@@ -686,6 +706,8 @@ async function loadSummary() {
   const q = params.toString() ? '?' + params.toString() : '';
   const data = await fetch(API+'/api/summary' + q).then(r=>r.json()).catch(()=>null);
   if (!data || data.error) { area.innerHTML = '<div class="loading-center">データ不足</div>'; return; }
+  const lu = document.getElementById('last-updated');
+  if (lu) { const now = new Date(); lu.textContent = `最終更新: ${now.getHours()}:${String(now.getMinutes()).padStart(2,'0')}`; }
 
   const label = currentToday ? '今日' : (currentDays ? `直近${currentDays}日` : '全期間');
 

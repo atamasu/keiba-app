@@ -566,7 +566,7 @@ def start_scheduler():
     # 毎日JST 0:30に前日分を自動収集
     scheduler.add_job(nightly_collect, CronTrigger(hour=0, minute=30, timezone=jst))
 
-    # 本日のデータをレース時間帯（12時・16時・20時・23時）に自動収集
+    # 本日のデータをレース時間帯（10〜23時、毎時0分）に自動収集
     def today_collect():
         target = date.today().isoformat()
         if collect_status.get(target, {}).get("status") == "running":
@@ -574,8 +574,7 @@ def start_scheduler():
         thread = threading.Thread(target=run_collect, args=(target,), daemon=True)
         thread.start()
 
-    for hour in [12, 16, 20, 23]:
-        scheduler.add_job(today_collect, CronTrigger(hour=hour, minute=0, timezone=jst))
+    scheduler.add_job(today_collect, CronTrigger(hour='10-23', minute=30, timezone=jst))
 
     scheduler.start()
 
