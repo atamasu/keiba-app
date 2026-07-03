@@ -373,11 +373,14 @@
   <div id="tab-collect">
     <div class="card">
       <h2>データ収集</h2>
-      <button class="btn btn-primary" id="btn-yesterday" onclick="startCollect('yesterday')">
-        📥 昨日のデータを回収する
+      <button class="btn btn-primary" id="btn-missing" onclick="startMissingCollect()">
+        🔍 1週間の未収集分を補完する
       </button>
       <button class="btn btn-secondary" id="btn-today" onclick="startCollect('today')">
-        📅 本日のデータを回収する
+        📅 本日のデータを今すぐ回収する
+      </button>
+      <button class="btn btn-secondary" id="btn-yesterday" onclick="startCollect('yesterday')">
+        📥 昨日のデータを回収する
       </button>
       <div id="collect-log" class="log-box"></div>
     </div>
@@ -520,6 +523,36 @@ function showTab(name) {
 }
 
 // ── データ収集 ────────────────────────────────
+async function startMissingCollect() {
+  const btn = document.getElementById('btn-missing');
+  btn.disabled = true;
+  btn.innerHTML = '<div class="spinner"></div> 確認中...';
+  const logBox = document.getElementById('collect-log');
+  logBox.innerHTML = '';
+  logBox.classList.add('visible');
+
+  try {
+    const res = await fetch('/api/collect/missing', { method: 'POST' });
+    const data = await res.json();
+    if (data.status === 'none') {
+      logBox.innerHTML = '<div class="log-line ok">✅ 未収集データなし（直近1週間はすべて収集済み）</div>';
+      btn.disabled = false;
+      btn.innerHTML = '🔍 1週間の未収集分を補完する';
+      return;
+    }
+    appendLog(`📋 未収集日: ${data.missing.join(', ')}`);
+    appendLog('🔄 順番に収集中...');
+    // 最初の日付をポーリング（完了後に次へ進む）
+    const firstDate = data.missing[0];
+    if (collectPolling) clearInterval(collectPolling);
+    collectPolling = setInterval(() => pollCollect(firstDate, btn, 'btn-missing'), 2000);
+  } catch(e) {
+    appendLog('❌ エラー: ' + e.message, 'err');
+    btn.disabled = false;
+    btn.innerHTML = '🔍 1週間の未収集分を補完する';
+  }
+}
+
 async function startCollect(when) {
   const btnId = when === 'yesterday' ? 'btn-yesterday' : 'btn-today';
   const btn = document.getElementById(btnId);

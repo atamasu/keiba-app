@@ -374,6 +374,30 @@ def api_collect_status():
     return jsonify({"date": target, **info})
 
 
+@app.route("/api/collect/missing", methods=["POST"])
+def api_collect_missing():
+    """過去7日間の未収集日をまとめて収集する"""
+    missing = []
+    for i in range(1, 8):
+        d = (date.today() - timedelta(days=i)).isoformat()
+        csv_files = glob.glob(f"{DATA_DIR}/{d}/*.csv")
+        if not csv_files:
+            missing.append(d)
+
+    if not missing:
+        return jsonify({"status": "none", "message": "未収集データなし", "missing": []})
+
+    def collect_all_missing():
+        for d in missing:
+            if collect_status.get(d, {}).get("status") == "running":
+                continue
+            run_collect(d)
+
+    thread = threading.Thread(target=collect_all_missing, daemon=True)
+    thread.start()
+    return jsonify({"status": "started", "missing": missing})
+
+
 @app.route("/api/races")
 def api_races():
     venue = request.args.get("venue")
@@ -521,6 +545,18 @@ def start_scheduler():
 
     # 毎日JST 0:30に前日分を自動収集
     scheduler.add_job(nightly_collect, CronTrigger(hour=0, minute=30, timezone=jst))
+
+    # 本日のデータをレース時間帯（12時・16時・20時・23時）に自動収集
+    def today_collect():
+        target = date.today().isoformat()
+        if collect_status.get(target, {}).get("status") == "running":
+            return
+        thread = threading.Thread(target=run_collect, args=(target,), daemon=True)
+        thread.start()
+
+    for hour in [12, 16, 20, 23]:
+        scheduler.add_job(today_collect, CronTrigger(hour=hour, minute=0, timezone=jst))
+
     scheduler.start()
 
 
