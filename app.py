@@ -594,6 +594,7 @@ def api_venue_analysis():
                             "umaban": defaultdict(int),
                             "ninki": defaultdict(int),
                             "ninki_pairs": defaultdict(int),
+                            "umaban_pairs": defaultdict(int),
                             "total": 0,
                         }
                     result[v]["dates"].add(parent)
@@ -607,12 +608,21 @@ def api_venue_analysis():
                         if nk:
                             result[v]["ninki"][nk] += 1
                             ninkis.append(int(nk))
-                    # 人気ペア（ワイド人気組み合わせ）
+                    # 人気ペア
                     ninkis_sorted = sorted(set(ninkis))
                     for a in range(len(ninkis_sorted)):
                         for b in range(a + 1, len(ninkis_sorted)):
-                            key = f"{ninkis_sorted[a]}-{ninkis_sorted[b]}"
-                            result[v]["ninki_pairs"][key] += 1
+                            result[v]["ninki_pairs"][f"{ninkis_sorted[a]}-{ninkis_sorted[b]}"] += 1
+                    # 馬番ペア
+                    ubans = []
+                    for i in range(1, 4):
+                        ub = row.get(f"馬番{i}", "")
+                        if ub:
+                            ubans.append(int(ub))
+                    ubans_sorted = sorted(set(ubans))
+                    for a in range(len(ubans_sorted)):
+                        for b in range(a + 1, len(ubans_sorted)):
+                            result[v]["umaban_pairs"][f"{ubans_sorted[a]}-{ubans_sorted[b]}"] += 1
         except Exception:
             pass
 
@@ -627,6 +637,7 @@ def api_venue_analysis():
             um2 = defaultdict(int)
             nk2 = defaultdict(int)
             np2 = defaultdict(int)
+            up2 = defaultdict(int)
             tot2 = 0
             for csv_path2 in glob.glob(f"{DATA_DIR}/**/{venue}_result.csv", recursive=True):
                 parent2 = os.path.basename(os.path.dirname(csv_path2))
@@ -648,16 +659,26 @@ def api_venue_analysis():
                             for a in range(len(nkl_s)):
                                 for b in range(a + 1, len(nkl_s)):
                                     np2[f"{nkl_s[a]}-{nkl_s[b]}"] += 1
+                            ubl = []
+                            for i in range(1, 4):
+                                ub = row.get(f"馬番{i}", "")
+                                if ub: ubl.append(int(ub))
+                            ubl_s = sorted(set(ubl))
+                            for a in range(len(ubl_s)):
+                                for b in range(a + 1, len(ubl_s)):
+                                    up2[f"{ubl_s[a]}-{ubl_s[b]}"] += 1
                 except Exception:
                     pass
             umaban_cnt = um2
             ninki_cnt = nk2
             ninki_pairs_cnt = np2
+            umaban_pairs_cnt = up2
             total = tot2 or total
         else:
             umaban_cnt = d["umaban"]
             ninki_cnt = d["ninki"]
             ninki_pairs_cnt = d["ninki_pairs"]
+            umaban_pairs_cnt = d["umaban_pairs"]
 
         if total == 0:
             continue
@@ -665,23 +686,21 @@ def api_venue_analysis():
         top_umaban = sorted(umaban_cnt.items(), key=lambda x: -x[1])[:3]
         top_ninki = sorted(ninki_cnt.items(), key=lambda x: -x[1])[:3]
         top_ninki_pairs = sorted(ninki_pairs_cnt.items(), key=lambda x: -x[1])[:3]
+        top_umaban_pairs = sorted(umaban_pairs_cnt.items(), key=lambda x: -x[1])[:3]
 
-        # 激推し：馬番出現率≥50% かつ 人気出現率≥50% が重なるもの
-        high_uma = {k for k, c in umaban_cnt.items() if c / total >= 0.5}
-        high_nk = {k for k, c in ninki_cnt.items() if c / total >= 0.5}
-        star = []
-        if high_uma and high_nk:
-            star = [
-                f"馬番{u}×{n}人気"
-                for u in sorted(high_uma, key=lambda x: -umaban_cnt[x])[:2]
-                for n in sorted(high_nk, key=lambda x: -ninki_cnt[x])[:2]
-            ][:3]
+        # 激推し：出現率≥50%の馬番 × 出現率≥50%の人気 の組み合わせ
+        high_uma = sorted([k for k, c in umaban_cnt.items() if c / total >= 0.5],
+                          key=lambda x: -umaban_cnt[x])[:2]
+        high_nk = sorted([k for k, c in ninki_cnt.items() if c / total >= 0.5],
+                         key=lambda x: -ninki_cnt[x])[:2]
+        star = [f"馬番{u}×{n}人気" for u in high_uma for n in high_nk][:4]
 
         out.append({
             "venue": venue,
             "total_races": total,
             "top_umaban": [{"umaban": k, "count": c, "rate": round(c / total * 100)} for k, c in top_umaban],
             "top_ninki": [{"ninki": k, "count": c, "rate": round(c / total * 100)} for k, c in top_ninki],
+            "top_umaban_pairs": [{"pair": k, "count": c, "rate": round(c / total * 100)} for k, c in top_umaban_pairs],
             "top_ninki_pairs": [{"pair": k, "count": c, "rate": round(c / total * 100)} for k, c in top_ninki_pairs],
             "star": star,
         })
