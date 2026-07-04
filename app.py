@@ -83,7 +83,7 @@ def calc_stats(rows):
 
 
 def recommend(stats):
-    filtered = [s for s in stats if s['回収率'] >= 100 and s['人気'] <= 20 and s['出現数'] >= 2]
+    filtered = [s for s in stats if s['人気'] <= 20 and s['出現数'] >= 2]
     return sorted(filtered, key=lambda x: (-x['回収率'], x['人気']))[:8]
 
 

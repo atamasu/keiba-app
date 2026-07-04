@@ -786,15 +786,13 @@ async function loadSummary() {
     }).join('');
   }
 
-  const overallCard = overallHtml ? `
+  area.innerHTML = `
     <div class="card">
       <div class="summary-section">
         <h3>🏆 全体おすすめ（${label} / ${data.total_races}R）</h3>
         <div class="summary-grid">${overallHtml}</div>
       </div>
-    </div>` : '';
-
-  area.innerHTML = `${overallCard}
+    </div>
     ${venueCardHtml}
     <div class="card">
       <div class="summary-section">
