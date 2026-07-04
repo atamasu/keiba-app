@@ -764,13 +764,6 @@ async function loadSummary() {
         <div class="summary-grid">${vRows}</div>
       </div>
     </div>`;
-  } else if (venueData) {
-    venueCardHtml = `<div class="card" style="border-color:#bfdbfe">
-      <div class="summary-section">
-        <h3>🏟 ${currentSummaryVenue}のおすすめ（${label}）</h3>
-        <p style="color:#8a9ab8;font-size:13px;padding:8px 0">回収率100%超のデータがまだありません</p>
-      </div>
-    </div>`;
   }
 
   const byROI = [...data.by_venue].sort((a,b) => b.top.回収率 - a.top.回収率);
@@ -793,13 +786,15 @@ async function loadSummary() {
     }).join('');
   }
 
-  area.innerHTML = `
+  const overallCard = overallHtml ? `
     <div class="card">
       <div class="summary-section">
         <h3>🏆 全体おすすめ（${label} / ${data.total_races}R）</h3>
-        <div class="summary-grid">${overallHtml || '<p style="color:#8a9ab8;font-size:13px;padding:8px 0">回収率100%超のデータがまだありません</p>'}</div>
+        <div class="summary-grid">${overallHtml}</div>
       </div>
-    </div>
+    </div>` : '';
+
+  area.innerHTML = `${overallCard}
     ${venueCardHtml}
     <div class="card">
       <div class="summary-section">
