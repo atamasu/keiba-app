@@ -888,7 +888,7 @@ async function loadStats() {
   }
   const { stats, recommend, venue } = data;
   const total = stats[0]?.total_races || 0;
-  const medals = ['🥇','🥈','🥉'];
+  const rankLabels = ['🥇','🥈','🥉','4位','5位','6位','7位','8位'];
   const fib = [100, 200, 300, 500, 800, 1300, 2100];
 
   const recHtml = recommend.map((r, i) => {
@@ -900,7 +900,7 @@ async function loadStats() {
         ? '<span class="badge badge-yellow">惜しい</span>'
         : '<span class="badge badge-red">▼ マイナス</span>';
     return `<div class="rec-item">
-      <div class="rec-medal">${medals[i]}</div>
+      <div class="rec-medal" style="font-size:${i < 3 ? 28 : 14}px">${rankLabels[i] || ''}</div>
       <div class="rec-pop">${r.人気}人気</div>
       <div class="rec-detail">
         <div class="lbl">平均配当</div>
