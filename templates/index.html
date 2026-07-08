@@ -1614,6 +1614,33 @@ async function loadSanrenpuku() {
     html += '</table></div>';
   }
 
+  // 複勝 馬番別おすすめ
+  if (fk && fk.umaban && fk.umaban.length) {
+    const sortedUmaban = [...fk.umaban].sort((a,b) => b.回収率 - a.回収率);
+    html += `<div class="card">
+      <h2>🐴 複勝 馬番別おすすめ <span style="font-size:12px;color:#64748b;font-weight:normal">(${fk.venue} / ${fk.total || ''}レース)</span></h2>
+      <p style="font-size:12px;color:#64748b;margin:0 0 10px">複勝で3着以内に入りやすい馬番（回収率順）</p>
+      <table style="width:100%;border-collapse:collapse;font-size:14px">
+        <tr style="background:#f8fafc;font-size:12px;color:#64748b">
+          <th style="padding:8px 6px;text-align:left">馬番</th>
+          <th style="padding:8px 6px;text-align:right">件数</th>
+          <th style="padding:8px 6px;text-align:right">出現率</th>
+          <th style="padding:8px 6px;text-align:right">平均配当</th>
+          <th style="padding:8px 6px;text-align:right">回収率</th>
+        </tr>`;
+    sortedUmaban.forEach((u, i) => {
+      const roiColor = u.回収率 >= 100 ? '#16a34a' : u.回収率 >= 80 ? '#d97706' : '#ef4444';
+      html += `<tr style="border-top:1px solid #f1f5f9${i===0?' background:#fefce8':''}">
+        <td style="padding:8px 6px;font-weight:700">${i===0?'🥇 ':''}${u.馬番}番</td>
+        <td style="padding:8px 6px;text-align:right">${u.出現数}件</td>
+        <td style="padding:8px 6px;text-align:right">${u.出現率}%</td>
+        <td style="padding:8px 6px;text-align:right">${u.平均配当 ? u.平均配当.toLocaleString()+'円' : '-'}</td>
+        <td style="padding:8px 6px;text-align:right;color:${roiColor};font-weight:700">${u.回収率}%</td>
+      </tr>`;
+    });
+    html += '</table></div>';
+  }
+
   // 複勝 人気別（参考）
   if (fk && fk.stats && fk.stats.length) {
     html += `<div class="card">

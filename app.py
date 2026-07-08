@@ -643,12 +643,14 @@ def load_fukusho_data(venue=None, days=None, today_only=False, meetings=None):
 
 
 def calc_fukusho_stats(rows):
-    """複勝データから人気別・枠別の出現率・回収率を計算"""
+    """複勝データから人気別・枠別・馬番別の出現率・回収率を計算"""
     race_keys = set()
     pop_count = defaultdict(int)
     pop_pay_sum = defaultdict(int)
     waku_count = defaultdict(int)
     waku_pay_sum = defaultdict(int)
+    umaban_count = defaultdict(int)
+    umaban_pay_sum = defaultdict(int)
     for row in rows:
         race_keys.add((row.get('日付', ''), row.get('競馬場', ''), row.get('R', '')))
         pop = row.get('人気', 0)
@@ -659,6 +661,10 @@ def calc_fukusho_stats(rows):
         if waku:
             waku_count[waku] += 1
             waku_pay_sum[waku] += row.get('配当円', 0)
+        umaban = _safe_int(row.get('馬番', 0))
+        if umaban:
+            umaban_count[umaban] += 1
+            umaban_pay_sum[umaban] += row.get('配当円', 0)
     total = len(race_keys)
     stats = []
     for p in sorted(pop_count):
@@ -684,7 +690,18 @@ def calc_fukusho_stats(rows):
             "平均配当": round(waku_pay_sum[w] / cnt) if cnt else 0,
             "回収率": round(total_ret / (total * 100) * 100, 1) if total else 0,
         })
-    return {"ninki": stats, "waku": waku_stats, "total": total}
+    umaban_stats = []
+    for u in sorted(umaban_count):
+        cnt = umaban_count[u]
+        total_ret = umaban_pay_sum[u]
+        umaban_stats.append({
+            "馬番": u,
+            "出現数": cnt,
+            "出現率": round(cnt / total * 100, 1) if total else 0,
+            "平均配当": round(umaban_pay_sum[u] / cnt) if cnt else 0,
+            "回収率": round(total_ret / (total * 100) * 100, 1) if total else 0,
+        })
+    return {"ninki": stats, "waku": waku_stats, "umaban": umaban_stats, "total": total}
 
 
 def load_sanrenpuku_data(venue=None, days=None, today_only=False, meetings=None):
