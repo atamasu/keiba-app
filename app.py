@@ -209,9 +209,10 @@ def parse_venue_day(html):
                 entry[f"人気{i}"] = fe["ninki"]
                 entry[f"枠{i}"] = waku_map.get(str(i), "")
                 entry[f"配当{i}"] = fe["pay"]
-            # ページには上位3頭しか表示されないため馬番最大値を頭数下限として使用
-            max_ub = max((int(fe["umaban"]) for fe in fuku_entries if fe["umaban"].isdigit()), default=0)
-            entry["頭数"] = max_ub
+            # raceResultの全行数が実際の出走頭数
+            entry["頭数"] = total_horses if total_horses > 0 else max(
+                (int(fe["umaban"]) for fe in fuku_entries if fe["umaban"].isdigit()), default=0
+            )
             entry["fuku_entries"] = fuku_entries[:3]
             entry["waku_map"] = waku_map
             results.append(entry)
