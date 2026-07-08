@@ -916,8 +916,7 @@ def api_venue_analysis():
     else:
         date_filter = None
 
-    # 全データ読み込み（meetings用に日付基準を統一するため field_size フィルターなしで先に読む）
-    all_data_dates = load_venue_results() if meetings else None
+    # 全データ読み込み（meetings用に一旦全部取る）
     all_data = load_venue_results(field_size=field_size)
 
     out = []
@@ -929,9 +928,7 @@ def api_venue_analysis():
             cutoff = (date.today() - timedelta(days=days - 1)).isoformat()
             use_dates = {dt for dt in d["dates"] if dt >= cutoff}
         elif meetings:
-            # 直近N回はfield_sizeに関係なく全レースの開催日から選ぶ（フィルター次第で基準日がズレないよう）
-            base_dates = all_data_dates.get(venue, {}).get("dates", d["dates"])
-            use_dates = set(sorted(base_dates, reverse=True)[:meetings])
+            use_dates = set(sorted(d["dates"], reverse=True)[:meetings])
         else:
             use_dates = d["dates"]
 
