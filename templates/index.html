@@ -376,6 +376,9 @@
       <button class="btn btn-primary" id="btn-missing" onclick="startMissingCollect()">
         🔍 1週間の未収集分を補完する
       </button>
+      <button class="btn btn-secondary" id="btn-backfill" onclick="startBackfillSanrenpuku()">
+        🎯 三連複・複勝データを1ヶ月分補完する
+      </button>
       <button class="btn btn-secondary" id="btn-today" onclick="startCollect('today')">
         📅 本日のデータを今すぐ回収する
       </button>
@@ -590,6 +593,59 @@ async function startMissingCollect() {
     appendLog('❌ エラー: ' + e.message, 'err');
     btn.disabled = false;
     btn.innerHTML = '🔍 1週間の未収集分を補完する';
+  }
+}
+
+async function startBackfillSanrenpuku() {
+  const btn = document.getElementById('btn-backfill');
+  btn.disabled = true;
+  btn.innerHTML = '<div class="spinner"></div> 確認中...';
+  const logBox = document.getElementById('collect-log');
+  logBox.innerHTML = '';
+  logBox.classList.add('visible');
+
+  try {
+    const res = await fetch(API+'/api/collect/backfill_sanrenpuku', { method: 'POST' });
+    const data = await res.json();
+    if (data.status === 'none') {
+      logBox.innerHTML = '<div class="log-line ok">✅ 補完不要（全日付にデータあり）</div>';
+      btn.disabled = false;
+      btn.innerHTML = '🎯 三連複・複勝データを1ヶ月分補完する';
+      return;
+    }
+    const targets = (data.targets || []).sort();
+    appendLog(`📋 補完対象: ${targets.length}日分 (${targets[0]} 〜 ${targets[targets.length-1]})`);
+    appendLog('🔄 順番に収集中...');
+    if (collectPolling) clearInterval(collectPolling);
+    collectPolling = setInterval(async () => {
+      const results = await Promise.all(
+        targets.map(d => fetch(API+`/api/collect/status?date=${d}`).then(r=>r.json()).catch(()=>null))
+      );
+      const logBox = document.getElementById('collect-log');
+      logBox.innerHTML = results.filter(Boolean).map(r => {
+        return r.log.map(line => {
+          let cls = 'log-line';
+          if (line.startsWith('✅')) cls += ' ok';
+          else if (line.startsWith('⏭')) cls += ' skip';
+          else if (line.startsWith('❌')) cls += ' err';
+          return `<div class="${cls}">[${r.date}] ${line}</div>`;
+        }).join('');
+      }).join('');
+      logBox.scrollTop = logBox.scrollHeight;
+
+      const allDone = results.every(r => r && (r.status === 'done' || r.status === 'error'));
+      if (allDone) {
+        clearInterval(collectPolling);
+        btn.disabled = false;
+        btn.innerHTML = '🎯 三連複・複勝データを1ヶ月分補完する';
+        appendLog('🎉 全日付の補完完了！');
+        loadRecent();
+      }
+    }, 2000);
+  } catch(e) {
+    appendLog('❌ エラー: ' + e.message, 'err');
+    btn.disabled = false;
+    btn.innerHTML = '🎯 三連複・複勝データを1ヶ月分補完する';
   }
 }
 

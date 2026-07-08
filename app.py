@@ -471,6 +471,28 @@ def api_collect_missing():
     return jsonify({"status": "started", "missing": missing})
 
 
+@app.route("/api/collect/backfill_sanrenpuku", methods=["POST"])
+def api_collect_backfill_sanrenpuku():
+    """過去30日間のうち_fukusho.csvがない日を再収集（三連複・複勝データ補完）"""
+    targets = []
+    for i in range(1, 31):
+        d = (date.today() - timedelta(days=i)).isoformat()
+        fuku_files = glob.glob(f"{DATA_DIR}/{d}/*_fukusho.csv")
+        if not fuku_files:
+            targets.append(d)
+
+    if not targets:
+        return jsonify({"status": "none", "message": "補完不要（全日付にデータあり）", "targets": []})
+
+    def run_backfill():
+        for d in sorted(targets):
+            run_collect(d)
+
+    thread = threading.Thread(target=run_backfill, daemon=True)
+    thread.start()
+    return jsonify({"status": "started", "targets": targets, "count": len(targets)})
+
+
 @app.route("/api/races")
 def api_races():
     venue = request.args.get("venue")
