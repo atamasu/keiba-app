@@ -870,10 +870,15 @@ async function loadSummary() {
     }).join('');
   }
 
-  // 複勝おすすめHTML
+  // 複勝おすすめHTML（人気別・枠色別・馬番別）
+  const WAKU_BG_S   = ['','#f3f4f6','#1f2937','#fee2e2','#dbeafe','#fef9c3','#dcfce7','#ffedd5','#fce7f3'];
+  const WAKU_COL_S  = ['','#111','#fff','#fff','#fff','#000','#fff','#fff','#fff'];
+  const WAKU_NAME_S = ['','白','黒','赤','青','黄','緑','橙','桃'];
+
   let fukuHtml = '';
-  if (fukuData && fukuData.recommend && fukuData.recommend.length) {
-    const fukuRows = fukuData.recommend.slice(0,5).map((r,i) => {
+  if (fukuData && (fukuData.recommend?.length || fukuData.waku?.length)) {
+    // 人気別
+    const fukuRows = (fukuData.recommend || []).slice(0,5).map((r,i) => {
       const roiColor = r.回収率 >= 100 ? '#16a34a' : r.回収率 >= 80 ? '#d97706' : '#64748b';
       return `<div class="summary-row">
         <div style="font-size:16px;min-width:24px">${['🥇','🥈','🥉','4位','5位'][i]||''}</div>
@@ -882,13 +887,59 @@ async function loadSummary() {
         <div style="text-align:right;font-size:18px;font-weight:900;color:${roiColor}">${r.回収率}%</div>
       </div>`;
     }).join('');
-    fukuHtml = `<div class="card">
+
+    // 枠色別（回収率順 上位5）
+    const sortedWaku = [...(fukuData.waku || [])].sort((a,b) => b.回収率 - a.回収率).slice(0,5);
+    const wakuRows = sortedWaku.map((w,i) => {
+      const wi = w.枠;
+      const bg = WAKU_BG_S[wi] || '#f3f4f6';
+      const col = WAKU_COL_S[wi] || '#111';
+      const name = WAKU_NAME_S[wi] || wi;
+      const roiColor = w.回収率 >= 100 ? '#16a34a' : w.回収率 >= 80 ? '#d97706' : '#64748b';
+      const badge = `<span style="display:inline-flex;align-items:center;gap:4px"><span style="display:inline-block;width:24px;height:24px;line-height:24px;text-align:center;border-radius:50%;background:${bg};color:${col};font-size:13px;font-weight:700;border:1px solid #e2e8f0">${wi}</span><span>${name}枠</span></span>`;
+      return `<div class="summary-row">
+        <div style="font-size:16px;min-width:24px">${['🥇','🥈','🥉','4位','5位'][i]||''}</div>
+        <div style="flex:1;font-weight:700">${badge}</div>
+        <div class="summary-detail">${w.出現数}件 / ${w.出現率}%</div>
+        <div style="text-align:right;font-size:18px;font-weight:900;color:${roiColor}">${w.回収率}%</div>
+      </div>`;
+    }).join('');
+
+    // 馬番別（回収率順 上位5）
+    const sortedUmaban = [...(fukuData.umaban || [])].sort((a,b) => b.回収率 - a.回収率).slice(0,5);
+    const umabanRows = sortedUmaban.map((u,i) => {
+      const roiColor = u.回収率 >= 100 ? '#16a34a' : u.回収率 >= 80 ? '#d97706' : '#64748b';
+      return `<div class="summary-row">
+        <div style="font-size:16px;min-width:24px">${['🥇','🥈','🥉','4位','5位'][i]||''}</div>
+        <div class="summary-pop" style="font-size:18px;min-width:54px">${u.馬番}番</div>
+        <div class="summary-detail">${u.出現数}件 / ${u.出現率}%</div>
+        <div style="text-align:right;font-size:18px;font-weight:900;color:${roiColor}">${u.回収率}%</div>
+      </div>`;
+    }).join('');
+
+    const venueName = fukuData.venue || '全競馬場';
+    fukuHtml = `
+    <div class="card">
       <div class="summary-section">
-        <h3>📊 複勝おすすめ（${label} / 参考）</h3>
-        <p style="font-size:12px;color:#64748b;margin:0 0 10px">複勝圏内に入りやすい人気（ワイド・三連複選びの参考に）</p>
+        <h3>🎨 複勝 枠色おすすめ（${label} / ${venueName}）</h3>
+        <p style="font-size:12px;color:#64748b;margin:0 0 10px">3着以内に入りやすい枠（回収率順）</p>
+        <div class="summary-grid">${wakuRows || '<p style="color:#9ca3af;font-size:13px">データなし</p>'}</div>
+      </div>
+    </div>
+    <div class="card">
+      <div class="summary-section">
+        <h3>🐴 複勝 馬番おすすめ（${label} / ${venueName}）</h3>
+        <p style="font-size:12px;color:#64748b;margin:0 0 10px">3着以内に入りやすい馬番（回収率順）</p>
+        <div class="summary-grid">${umabanRows || '<p style="color:#9ca3af;font-size:13px">データなし</p>'}</div>
+      </div>
+    </div>
+    ${fukuRows ? `<div class="card">
+      <div class="summary-section">
+        <h3>📊 複勝 人気おすすめ（${label} / ${venueName}）</h3>
+        <p style="font-size:12px;color:#64748b;margin:0 0 10px">複勝圏内に入りやすい人気（参考）</p>
         <div class="summary-grid">${fukuRows}</div>
       </div>
-    </div>`;
+    </div>` : ''}`;
   }
 
   area.innerHTML = `

@@ -141,10 +141,19 @@ def parse_venue_day(html):
             for tr in horse_rows:
                 tds = tr.find_all("td")
                 if len(tds) >= 3:
-                    chakujun = tds[0].get_text(strip=True)
-                    waku = tds[1].get_text(strip=True)
-                    if chakujun in ("1", "2", "3") and re.match(r'^\d+$', waku):
-                        waku_list.append((chakujun, waku))
+                    # 全角→半角正規化して着順を取得
+                    chakujun_raw = tds[0].get_text(strip=True)
+                    chakujun = chakujun_raw.translate(str.maketrans('０１２３４５６７８９', '0123456789')).strip()
+                    # 着順が "1" "2" "3" のみ対象
+                    m_cj = re.match(r'^(\d+)', chakujun)
+                    if not m_cj or m_cj.group(1) not in ("1", "2", "3"):
+                        continue
+                    pos = m_cj.group(1)
+                    # 枠番は1列目、ただし列構成が異なる場合のフォールバック
+                    waku_raw = tds[1].get_text(strip=True)
+                    waku = waku_raw.translate(str.maketrans('０１２３４５６７８９', '0123456789')).strip()
+                    if re.match(r'^\d+$', waku) and 1 <= int(waku) <= 8:
+                        waku_list.append((pos, waku))
             if horse_rows:
                 break
 
@@ -1009,9 +1018,9 @@ def api_today_live():
             venues_data.append({
                 "venue": venue_name,
                 "completed_races": total,
-                "hot_umaban": [{"val": k, "count": c, "rate": round(c/total*100)} for k, c in sorted(um_count.items(), key=lambda x: -x[1])[:3]],
-                "hot_ninki": [{"val": k, "count": c, "rate": round(c/total*100)} for k, c in sorted(nk_count.items(), key=lambda x: -x[1])[:3]],
-                "hot_waku": [{"val": k, "count": c, "rate": round(c/total*100)} for k, c in sorted(wk_count.items(), key=lambda x: -x[1])[:3]],
+                "hot_umaban": [{"val": k, "count": c, "rate": round(c/total*100)} for k, c in sorted(um_count.items(), key=lambda x: -x[1])[:5]],
+                "hot_ninki": [{"val": k, "count": c, "rate": round(c/total*100)} for k, c in sorted(nk_count.items(), key=lambda x: -x[1])[:5]],
+                "hot_waku": [{"val": k, "count": c, "rate": round(c/total*100)} for k, c in sorted(wk_count.items(), key=lambda x: -x[1])[:5]],
             })
         except Exception:
             pass
