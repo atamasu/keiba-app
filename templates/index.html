@@ -363,6 +363,7 @@
   <div class="tab-bar">
     <div class="tab active" onclick="showTab('collect')">📥 収集</div>
     <div class="tab" onclick="showTab('summary')">🏆 おすすめ</div>
+    <div class="tab" onclick="showTab('sanrenpuku')">🎯 三連複</div>
     <div class="tab" onclick="showTab('analysis')">📊 詳細</div>
     <div class="tab" onclick="showTab('races')">📑 レース</div>
     <div class="tab" onclick="showTab('history')">📋 履歴</div>
@@ -446,6 +447,27 @@
     </div>
   </div>
 
+  <!-- 三連複おすすめタブ -->
+  <div id="tab-sanrenpuku" style="display:none">
+    <div style="display:flex;align-items:center;gap:8px;margin-bottom:12px">
+      <div class="period-bar" style="flex:1;margin-bottom:0">
+        <div class="period-btn" onclick="selectSanrenpukuPeriod('today', this)">今日</div>
+        <div class="period-btn active" onclick="selectSanrenpukuPeriod('meetings3', this)">直近3回</div>
+        <div class="period-btn" onclick="selectSanrenpukuPeriod(14, this)">2週間</div>
+        <div class="period-btn" onclick="selectSanrenpukuPeriod(30, this)">1ヶ月</div>
+        <div class="period-btn" onclick="selectSanrenpukuPeriod(null, this)">全期間</div>
+      </div>
+      <button onclick="loadSanrenpuku()" style="flex-shrink:0;padding:10px 14px;border-radius:10px;background:linear-gradient(135deg,#1d4ed8,#2563eb);color:#fff;border:none;font-size:13px;font-weight:700;cursor:pointer">🔄</button>
+    </div>
+    <div class="card" style="padding:14px;margin-bottom:12px">
+      <h2>競馬場を選択</h2>
+      <div class="venue-grid" id="sanrenpuku-venue-grid">
+        <div class="venue-btn all-btn active" onclick="selectSanrenpukuVenue(null, this)">全場</div>
+      </div>
+    </div>
+    <div id="sanrenpuku-area"><div class="loading-center">読み込み中...</div></div>
+  </div>
+
   <!-- レース一覧タブ -->
   <div id="tab-races" style="display:none">
     <!-- モード切替 -->
@@ -493,15 +515,19 @@ let currentSummaryVenue = null;
 let currentTrendVenue = null;
 
 function showTab(name) {
-  ['collect','summary','analysis','races','history'].forEach(t => {
+  ['collect','summary','sanrenpuku','analysis','races','history'].forEach(t => {
     document.getElementById('tab-'+t).style.display = t===name ? '' : 'none';
   });
   document.querySelectorAll('.tab').forEach((el,i) => {
-    el.classList.toggle('active', ['collect','summary','analysis','races','history'][i] === name);
+    el.classList.toggle('active', ['collect','summary','sanrenpuku','analysis','races','history'][i] === name);
   });
   if (name === 'summary') {
     if (document.querySelectorAll('#summary-venue-grid .venue-btn').length <= 1) loadSummaryVenues();
     else loadSummary();
+  }
+  if (name === 'sanrenpuku') {
+    if (document.querySelectorAll('#sanrenpuku-venue-grid .venue-btn').length <= 1) loadSanrenpukuVenues();
+    else loadSanrenpuku();
   }
   if (name === 'races') {
     if (!document.querySelector('#pattern-venue-grid .venue-btn')) loadPatternVenues();
@@ -1367,6 +1393,138 @@ async function loadHistory() {
 }
 
 loadRecent();
+
+// ── 三連複おすすめ ────────────────────────────────
+let currentSanrenpukuVenue = null;
+let currentSanrenpukuPeriod = 'meetings3';
+
+async function loadSanrenpukuVenues() {
+  const data = await fetch(API+'/api/venues').then(r=>r.json()).catch(()=>[]);
+  const grid = document.getElementById('sanrenpuku-venue-grid');
+  grid.innerHTML = '<div class="venue-btn all-btn active" onclick="selectSanrenpukuVenue(null, this)">全場</div>'
+    + data.map(v => `<div class="venue-btn" onclick="selectSanrenpukuVenue('${v}', this)">${v}</div>`).join('');
+  loadSanrenpuku();
+}
+
+function selectSanrenpukuVenue(venue, el) {
+  currentSanrenpukuVenue = venue;
+  document.querySelectorAll('#sanrenpuku-venue-grid .venue-btn').forEach(b => b.classList.remove('active'));
+  el.classList.add('active');
+  loadSanrenpuku();
+}
+
+function selectSanrenpukuPeriod(period, el) {
+  currentSanrenpukuPeriod = period;
+  document.querySelectorAll('#tab-sanrenpuku .period-btn').forEach(b => b.classList.remove('active'));
+  el.classList.add('active');
+  loadSanrenpuku();
+}
+
+async function loadSanrenpuku() {
+  const area = document.getElementById('sanrenpuku-area');
+  area.innerHTML = '<div class="loading-center">読み込み中...</div>';
+  const params = new URLSearchParams();
+  if (currentSanrenpukuVenue) params.set('venue', currentSanrenpukuVenue);
+  if (currentSanrenpukuPeriod === 'today') params.set('today', '1');
+  else if (currentSanrenpukuPeriod === 'meetings3') params.set('meetings', '3');
+  else if (currentSanrenpukuPeriod) params.set('days', currentSanrenpukuPeriod);
+
+  const [sr, fk] = await Promise.all([
+    fetch(API+'/api/sanrenpuku?'+params).then(r=>r.json()).catch(()=>null),
+    fetch(API+'/api/fukusho?'+params).then(r=>r.json()).catch(()=>null)
+  ]);
+
+  let html = '';
+
+  // 三連複 人気組み合わせ
+  if (sr && sr.ninki_combos && sr.ninki_combos.length) {
+    html += `<div class="card">
+      <h2>🎯 三連複 人気組み合わせ <span style="font-size:12px;color:#64748b;font-weight:normal">(${sr.venue} / ${sr.total}レース)</span></h2>
+      <table style="width:100%;border-collapse:collapse;font-size:14px">
+        <tr style="background:#f8fafc;font-size:12px;color:#64748b">
+          <th style="padding:8px 6px;text-align:left">人気組み合わせ</th>
+          <th style="padding:8px 6px;text-align:right">件数</th>
+          <th style="padding:8px 6px;text-align:right">出現率</th>
+          <th style="padding:8px 6px;text-align:right">平均配当</th>
+          <th style="padding:8px 6px;text-align:right">回収率</th>
+        </tr>`;
+    sr.ninki_combos.slice(0,15).forEach((c,i) => {
+      const roiColor = c.roi >= 100 ? '#16a34a' : c.roi >= 80 ? '#d97706' : '#ef4444';
+      const bg = i === 0 ? '#fefce8' : '';
+      html += `<tr style="border-top:1px solid #f1f5f9;${bg?'background:'+bg:''}">
+        <td style="padding:8px 6px;font-weight:${i<3?700:400}">${i===0?'🥇 ':''}${c.combo}人気</td>
+        <td style="padding:8px 6px;text-align:right">${c.count}件</td>
+        <td style="padding:8px 6px;text-align:right">${c.rate}%</td>
+        <td style="padding:8px 6px;text-align:right">${c.avg_pay ? c.avg_pay.toLocaleString()+'円' : '-'}</td>
+        <td style="padding:8px 6px;text-align:right;color:${roiColor};font-weight:700">${c.roi}%</td>
+      </tr>`;
+    });
+    html += '</table></div>';
+  } else {
+    html += '<div class="card"><p style="color:#9ca3af;text-align:center">三連複データなし（収集するとデータが蓄積されます）</p></div>';
+  }
+
+  // 三連複 枠組み合わせ
+  if (sr && sr.waku_combos && sr.waku_combos.length) {
+    const WAKU_COLORS = ['','#ffffff','#000000','#ef4444','#3b82f6','#f59e0b','#10b981','#f97316','#ef4444'];
+    const WAKU_BG    = ['','#f3f4f6','#374151','#fee2e2','#dbeafe','#fef9c3','#d1fae5','#ffedd5','#fee2e2'];
+    html += `<div class="card">
+      <h2>🔲 三連複 枠組み合わせ</h2>
+      <table style="width:100%;border-collapse:collapse;font-size:14px">
+        <tr style="background:#f8fafc;font-size:12px;color:#64748b">
+          <th style="padding:8px 6px;text-align:left">枠組み合わせ</th>
+          <th style="padding:8px 6px;text-align:right">件数</th>
+          <th style="padding:8px 6px;text-align:right">出現率</th>
+          <th style="padding:8px 6px;text-align:right">平均配当</th>
+          <th style="padding:8px 6px;text-align:right">回収率</th>
+        </tr>`;
+    sr.waku_combos.slice(0,10).forEach((c,i) => {
+      const roiColor = c.roi >= 100 ? '#16a34a' : c.roi >= 80 ? '#d97706' : '#ef4444';
+      const wakuBadges = c.combo.split('-').map(w => {
+        const wi = parseInt(w);
+        const bg = WAKU_BG[wi] || '#f3f4f6';
+        const col = WAKU_COLORS[wi] || '#111';
+        return `<span style="display:inline-block;width:22px;height:22px;line-height:22px;text-align:center;border-radius:50%;background:${bg};color:${col};font-size:12px;font-weight:700;border:1px solid #e2e8f0;margin:0 1px">${w}</span>`;
+      }).join('');
+      html += `<tr style="border-top:1px solid #f1f5f9">
+        <td style="padding:8px 6px">${wakuBadges}</td>
+        <td style="padding:8px 6px;text-align:right">${c.count}件</td>
+        <td style="padding:8px 6px;text-align:right">${c.rate}%</td>
+        <td style="padding:8px 6px;text-align:right">${c.avg_pay ? c.avg_pay.toLocaleString()+'円' : '-'}</td>
+        <td style="padding:8px 6px;text-align:right;color:${roiColor};font-weight:700">${c.roi}%</td>
+      </tr>`;
+    });
+    html += '</table></div>';
+  }
+
+  // 複勝 人気別（参考）
+  if (fk && fk.stats && fk.stats.length) {
+    html += `<div class="card">
+      <h2>📊 複勝 人気別 参考 <span style="font-size:12px;color:#64748b;font-weight:normal">(${fk.venue})</span></h2>
+      <p style="font-size:12px;color:#64748b;margin:0 0 10px">三連複・ワイドを選ぶ際の参考（複勝で圏内に入りやすい人気）</p>
+      <table style="width:100%;border-collapse:collapse;font-size:14px">
+        <tr style="background:#f8fafc;font-size:12px;color:#64748b">
+          <th style="padding:8px 6px;text-align:left">人気</th>
+          <th style="padding:8px 6px;text-align:right">複勝件数</th>
+          <th style="padding:8px 6px;text-align:right">出現率</th>
+          <th style="padding:8px 6px;text-align:right">平均配当</th>
+          <th style="padding:8px 6px;text-align:right">回収率</th>
+        </tr>`;
+    fk.stats.slice(0,10).forEach((s,i) => {
+      const roiColor = s.回収率 >= 100 ? '#16a34a' : s.回収率 >= 80 ? '#d97706' : '#ef4444';
+      html += `<tr style="border-top:1px solid #f1f5f9">
+        <td style="padding:8px 6px;font-weight:700">${s.人気}人気</td>
+        <td style="padding:8px 6px;text-align:right">${s.出現数}件</td>
+        <td style="padding:8px 6px;text-align:right">${s.出現率}%</td>
+        <td style="padding:8px 6px;text-align:right">${s.平均配当 ? Math.round(s.平均配当).toLocaleString()+'円' : '-'}</td>
+        <td style="padding:8px 6px;text-align:right;color:${roiColor};font-weight:700">${s.回収率}%</td>
+      </tr>`;
+    });
+    html += '</table></div>';
+  }
+
+  area.innerHTML = html || '<div class="card"><p style="color:#9ca3af;text-align:center">データなし</p></div>';
+}
 </script>
 </body>
 </html>

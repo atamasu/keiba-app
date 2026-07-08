@@ -147,9 +147,11 @@ def parse_venue_day(html):
                 break
 
         fuku_entries = []
+        sanrenpuku_pay = ""
         for table in div.find_all("table", class_="refund"):
             in_wide = False
             in_fuku = False
+            in_sanrenpuku = False
             for tr in table.find_all("tr"):
                 th = tr.find("th")
                 tds = tr.find_all("td")
@@ -158,6 +160,7 @@ def parse_venue_day(html):
                     if th_txt:  # 空th行ではフラグをリセットしない（続きの行が消える）
                         in_wide = "ワイド" in th_txt
                         in_fuku = "複勝" in th_txt
+                        in_sanrenpuku = "三連複" in th_txt
 
                 # ワイド
                 if in_wide and len(tds) >= 2:
@@ -171,24 +174,35 @@ def parse_venue_day(html):
                     if combo and pay:
                         races.append({"race_no": race_no, "combo": combo, "ninki": ninki, "pay": pay})
 
-                # 複勝（1〜3位馬番＋人気）
+                # 複勝（1〜3位馬番＋人気＋配当）
                 if in_fuku and len(tds) >= 3:
                     umaban = tds[0].get_text(strip=True)
+                    pay_raw = re.sub(r'[^\d]', '', tds[1].get_text())
                     nm = re.search(r'(\d+)', tds[2].get_text())
                     ninki = nm.group(1) if nm else ""
                     if umaban and ninki:
-                        fuku_entries.append({"umaban": umaban, "ninki": ninki})
+                        fuku_entries.append({"umaban": umaban, "ninki": ninki, "pay": pay_raw})
+
+                # 三連複
+                if in_sanrenpuku and len(tds) >= 2:
+                    combo = tds[0].get_text(strip=True)
+                    pay_raw = re.sub(r'[^\d]', '', tds[1].get_text())
+                    if combo and pay_raw:
+                        sanrenpuku_pay = pay_raw  # 三連複は1レース1件
 
         if fuku_entries:
-            entry = {"race_no": race_no}
+            entry = {"race_no": race_no, "sanrenpuku_pay": sanrenpuku_pay}
             waku_map = {c: w for c, w in waku_list}
             for i, fe in enumerate(fuku_entries[:3], 1):
                 entry[f"馬番{i}"] = fe["umaban"]
                 entry[f"人気{i}"] = fe["ninki"]
                 entry[f"枠{i}"] = waku_map.get(str(i), "")
+                entry[f"配当{i}"] = fe["pay"]
             # ページには上位3頭しか表示されないため馬番最大値を頭数下限として使用
             max_ub = max((int(fe["umaban"]) for fe in fuku_entries if fe["umaban"].isdigit()), default=0)
             entry["頭数"] = max_ub
+            entry["fuku_entries"] = fuku_entries[:3]
+            entry["waku_map"] = waku_map
             results.append(entry)
 
     return {"baba": baba, "weather": weather, "races": races, "results": results}
@@ -223,19 +237,43 @@ def collect_day(target_date, log):
                 log.append(f"✅ {venue_name}: {num_races}R 保存")
             else:
                 log.append(f"⏭ {venue_name}: データなし")
-            # 複勝データ保存
+            # 複勝データ保存 (_fukusho.csv) と 結果データ保存 (_result.csv)
             if result.get("results"):
+                # _fukusho.csv: 馬別配当データ
+                fuku_path = os.path.join(out_dir, f"{venue_name}_fukusho.csv")
+                with open(fuku_path, "w", encoding="utf-8", newline="") as f:
+                    writer = csv.writer(f)
+                    writer.writerow(["日付", "競馬場", "R", "馬番", "人気", "配当円", "枠"])
+                    for r in result["results"]:
+                        waku_map = r.get("waku_map", {})
+                        for fe in r.get("fuku_entries", []):
+                            # 枠はwaku_mapから着順ではなく馬番で引く必要があるが、
+                            # waku_mapは着順→枠のマップ。枠情報はentry[f"枠{i}"]から取得
+                            pass
+                        # entry の枠{i}を使って馬別に書き出す
+                        for i in range(1, 4):
+                            umaban = r.get(f"馬番{i}", "")
+                            ninki = r.get(f"人気{i}", "")
+                            pay = r.get(f"配当{i}", "")
+                            waku = r.get(f"枠{i}", "")
+                            if umaban and ninki:
+                                writer.writerow([
+                                    target_date, venue_name, r["race_no"],
+                                    umaban, ninki, pay, waku,
+                                ])
+
+                # _result.csv: 着順結果データ（三連複配当を追加）
                 res_path = os.path.join(out_dir, f"{venue_name}_result.csv")
                 with open(res_path, "w", encoding="utf-8", newline="") as f:
                     writer = csv.writer(f)
-                    writer.writerow(["日付", "競馬場", "R", "馬番1", "人気1", "枠1", "馬番2", "人気2", "枠2", "馬番3", "人気3", "枠3", "頭数"])
+                    writer.writerow(["日付", "競馬場", "R", "馬番1", "人気1", "枠1", "馬番2", "人気2", "枠2", "馬番3", "人気3", "枠3", "頭数", "三連複配当"])
                     for r in result["results"]:
                         writer.writerow([
                             target_date, venue_name, r["race_no"],
                             r.get("馬番1",""), r.get("人気1",""), r.get("枠1",""),
                             r.get("馬番2",""), r.get("人気2",""), r.get("枠2",""),
                             r.get("馬番3",""), r.get("人気3",""), r.get("枠3",""),
-                            r.get("頭数",""),
+                            r.get("頭数",""), r.get("sanrenpuku_pay",""),
                         ])
         except Exception as e:
             log.append(f"⏭ {venue_name}: {e}")
@@ -530,6 +568,180 @@ def api_trend():
     return jsonify(calc_trend(rows, target_pops))
 
 
+def _safe_int(val, default=0):
+    """文字列を安全にintに変換する。空文字・Noneはdefaultを返す"""
+    if val is None or val == "":
+        return default
+    try:
+        return int(val)
+    except (ValueError, TypeError):
+        return default
+
+
+def load_fukusho_data(venue=None, days=None, today_only=False, meetings=None):
+    """_fukusho.csv を読み込む"""
+    rows = []
+    cutoff = None
+    today_str = date.today().isoformat()
+    if today_only:
+        cutoff = today_str
+    elif days:
+        cutoff = (date.today() - timedelta(days=days - 1)).isoformat()
+
+    for f in sorted(glob.glob(f"{DATA_DIR}/**/*_fukusho.csv", recursive=True)):
+        parent = os.path.basename(os.path.dirname(f))
+        if not re.match(r'^\d{4}-\d{2}-\d{2}$', parent):
+            continue
+        if today_only and parent != today_str:
+            continue
+        if cutoff and not today_only and parent < cutoff:
+            continue
+        fname = os.path.basename(f)
+        v = fname.replace("_fukusho.csv", "")
+        if venue and v != venue:
+            continue
+        try:
+            with open(f, encoding="utf-8") as fp:
+                for row in csv.DictReader(fp):
+                    try:
+                        row['人気'] = _safe_int(row.get('人気'))
+                        row['配当円'] = _safe_int(row.get('配当円'))
+                        rows.append(row)
+                    except Exception:
+                        pass
+        except Exception:
+            pass
+
+    if meetings:
+        dates = sorted(set(r['日付'] for r in rows), reverse=True)[:meetings]
+        rows = [r for r in rows if r['日付'] in set(dates)]
+    return rows
+
+
+def calc_fukusho_stats(rows):
+    """複勝データから人気別出現率・回収率を計算（calc_stats()と同じ形式）"""
+    race_keys = set()
+    pop_count = defaultdict(int)
+    pop_pay_sum = defaultdict(int)
+    for row in rows:
+        race_keys.add((row.get('日付', ''), row.get('競馬場', ''), row.get('R', '')))
+        pop = row.get('人気', 0)
+        if pop:
+            pop_count[pop] += 1
+            pop_pay_sum[pop] += row.get('配当円', 0)
+    total = len(race_keys)
+    stats = []
+    for p in sorted(pop_count):
+        cnt = pop_count[p]
+        total_bet = total * 100
+        total_ret = pop_pay_sum[p]
+        stats.append({
+            "人気": p,
+            "出現数": cnt,
+            "出現率": round(cnt / total * 100, 1) if total else 0,
+            "平均配当": round(pop_pay_sum[p] / cnt) if cnt else 0,
+            "回収率": round(total_ret / total_bet * 100, 1) if total_bet else 0,
+            "total_races": total
+        })
+    return stats
+
+
+def load_sanrenpuku_data(venue=None, days=None, today_only=False, meetings=None):
+    """_result.csv を読み込んで三連複分析用データを返す"""
+    rows = []
+    cutoff = None
+    today_str = date.today().isoformat()
+    if today_only:
+        cutoff = today_str
+    elif days:
+        cutoff = (date.today() - timedelta(days=days - 1)).isoformat()
+
+    for f in sorted(glob.glob(f"{DATA_DIR}/**/*_result.csv", recursive=True)):
+        parent = os.path.basename(os.path.dirname(f))
+        if not re.match(r'^\d{4}-\d{2}-\d{2}$', parent):
+            continue
+        if today_only and parent != today_str:
+            continue
+        if cutoff and not today_only and parent < cutoff:
+            continue
+        fname = os.path.basename(f)
+        v = fname.replace("_result.csv", "")
+        if venue and v != venue:
+            continue
+        try:
+            with open(f, encoding="utf-8") as fp:
+                for row in csv.DictReader(fp):
+                    try:
+                        for i in range(1, 4):
+                            row[f'人気{i}'] = _safe_int(row.get(f'人気{i}'))
+                            row[f'枠{i}'] = _safe_int(row.get(f'枠{i}'))
+                        row['三連複配当'] = _safe_int(row.get('三連複配当'))
+                        row['頭数'] = _safe_int(row.get('頭数'))
+                        rows.append(row)
+                    except Exception:
+                        pass
+        except Exception:
+            pass
+
+    if meetings:
+        dates = sorted(set(r['日付'] for r in rows), reverse=True)[:meetings]
+        rows = [r for r in rows if r['日付'] in set(dates)]
+    return rows
+
+
+def calc_sanrenpuku_stats(rows):
+    """三連複データから人気組み合わせ・枠組み合わせ別集計"""
+    total = len(set((r.get('日付', ''), r.get('競馬場', ''), r.get('R', '')) for r in rows))
+
+    combo_count = defaultdict(int)
+    combo_pay = defaultdict(int)
+    waku_combo_count = defaultdict(int)
+    waku_combo_pay = defaultdict(int)
+
+    for r in rows:
+        p1, p2, p3 = r.get('人気1'), r.get('人気2'), r.get('人気3')
+        if p1 and p2 and p3:
+            key = '-'.join(map(str, sorted([p1, p2, p3])))
+            combo_count[key] += 1
+            combo_pay[key] += r.get('三連複配当', 0)
+
+        w1, w2, w3 = r.get('枠1'), r.get('枠2'), r.get('枠3')
+        if w1 and w2 and w3:
+            wkey = '-'.join(map(str, sorted([w1, w2, w3])))
+            waku_combo_count[wkey] += 1
+            waku_combo_pay[wkey] += r.get('三連複配当', 0)
+
+    ninki_combos = sorted(
+        [
+            {
+                "combo": k,
+                "count": combo_count[k],
+                "rate": round(combo_count[k] / total * 100, 1) if total else 0,
+                "avg_pay": round(combo_pay[k] / combo_count[k]) if combo_count[k] else 0,
+                "roi": round(combo_pay[k] / (total * 100) * 100, 1) if total else 0,
+            }
+            for k in combo_count
+        ],
+        key=lambda x: -x['count']
+    )[:20]
+
+    waku_combos = sorted(
+        [
+            {
+                "combo": k,
+                "count": waku_combo_count[k],
+                "rate": round(waku_combo_count[k] / total * 100, 1) if total else 0,
+                "avg_pay": round(waku_combo_pay[k] / waku_combo_count[k]) if waku_combo_count[k] else 0,
+                "roi": round(waku_combo_pay[k] / (total * 100) * 100, 1) if total else 0,
+            }
+            for k in waku_combo_count
+        ],
+        key=lambda x: -x['count']
+    )[:20]
+
+    return {"ninki_combos": ninki_combos, "waku_combos": waku_combos, "total": total}
+
+
 def load_venue_results(venues_filter=None, date_filter=None, field_size=None):
     """_result.csvを読み込んで競馬場別に集計する"""
     result = {}
@@ -786,6 +998,35 @@ def api_debug_files():
     except Exception as e:
         result["error"] = str(e)
     return jsonify(result)
+
+
+@app.route("/api/fukusho")
+def api_fukusho():
+    venue = request.args.get("venue")
+    days = request.args.get("days", type=int)
+    today_only = request.args.get("today") == "1"
+    meetings = request.args.get("meetings", type=int)
+    rows = load_fukusho_data(venue=venue, days=days, today_only=today_only)
+    if meetings:
+        dates = sorted(set(r['日付'] for r in rows), reverse=True)[:meetings]
+        rows = [r for r in rows if r['日付'] in set(dates)]
+    stats = calc_fukusho_stats(rows)
+    rec = recommend(stats)
+    return jsonify({"stats": stats, "recommend": rec, "venue": venue or "全競馬場"})
+
+
+@app.route("/api/sanrenpuku")
+def api_sanrenpuku():
+    venue = request.args.get("venue")
+    days = request.args.get("days", type=int)
+    today_only = request.args.get("today") == "1"
+    meetings = request.args.get("meetings", type=int)
+    rows = load_sanrenpuku_data(venue=venue, days=days, today_only=today_only)
+    if meetings:
+        dates = sorted(set(r['日付'] for r in rows), reverse=True)[:meetings]
+        rows = [r for r in rows if r['日付'] in set(dates)]
+    stats = calc_sanrenpuku_stats(rows)
+    return jsonify({**stats, "venue": venue or "全競馬場"})
 
 
 @app.route("/api/recent")
