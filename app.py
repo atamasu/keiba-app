@@ -187,7 +187,8 @@ def parse_venue_day(html):
 
                 # 複勝（1〜3位馬番＋人気＋配当）
                 if in_fuku and len(tds) >= 3:
-                    umaban = tds[0].get_text(strip=True)
+                    _zen2han = str.maketrans('０１２３４５６７８９', '0123456789')
+                    umaban = tds[0].get_text(strip=True).translate(_zen2han).strip()
                     pay_raw = re.sub(r'[^\d]', '', tds[1].get_text())
                     nm = re.search(r'(\d+)', tds[2].get_text())
                     ninki = nm.group(1) if nm else ""
@@ -1109,7 +1110,7 @@ def api_recent():
         venues = sorted([
             os.path.splitext(os.path.basename(f))[0]
             for f in all_csvs
-            if not os.path.basename(f).endswith("_result.csv")
+            if not os.path.basename(f).endswith(("_result.csv", "_fukusho.csv", "_sanrenpuku.csv"))
         ])
         result_count = sum(1 for f in all_csvs if os.path.basename(f).endswith("_result.csv"))
         result.append({"date": d, "venues": venues, "result_count": result_count})
