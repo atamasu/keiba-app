@@ -42,6 +42,8 @@ def load_all_data(venue=None, days=None, today_only=False):
         if cutoff and not today_only and parent < cutoff:
             continue
         v = os.path.splitext(os.path.basename(f))[0]
+        if v.endswith(('_result', '_fukusho', '_sanrenpuku')):
+            continue
         if venue and v != venue:
             continue
         with open(f, encoding="utf-8") as fp:

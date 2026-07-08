@@ -820,11 +820,13 @@ async function loadSummary() {
     return p;
   })() : null;
 
-  const [data, venueData] = await Promise.all([
+  const fukuParams = new URLSearchParams(venueParams || params);
+  const [data, venueData, fukuData] = await Promise.all([
     fetch(API+'/api/summary?' + params.toString()).then(r=>r.json()).catch(()=>null),
     venueParams
       ? fetch(API+'/api/stats?' + venueParams.toString()).then(r=>r.json()).catch(()=>null)
-      : Promise.resolve(null)
+      : Promise.resolve(null),
+    fetch(API+'/api/fukusho?' + fukuParams.toString()).then(r=>r.json()).catch(()=>null)
   ]);
 
   if (!data || data.error) { area.innerHTML = '<div class="loading-center">データ不足</div>'; return; }
@@ -868,6 +870,27 @@ async function loadSummary() {
     }).join('');
   }
 
+  // 複勝おすすめHTML
+  let fukuHtml = '';
+  if (fukuData && fukuData.recommend && fukuData.recommend.length) {
+    const fukuRows = fukuData.recommend.slice(0,5).map((r,i) => {
+      const roiColor = r.回収率 >= 100 ? '#16a34a' : r.回収率 >= 80 ? '#d97706' : '#64748b';
+      return `<div class="summary-row">
+        <div style="font-size:16px;min-width:24px">${['🥇','🥈','🥉','4位','5位'][i]||''}</div>
+        <div class="summary-pop" style="font-size:18px;min-width:54px">${r.人気}人気</div>
+        <div class="summary-detail">${r.出現数}件 / 出現率${r.出現率}%</div>
+        <div style="text-align:right;font-size:18px;font-weight:900;color:${roiColor}">${r.回収率}%</div>
+      </div>`;
+    }).join('');
+    fukuHtml = `<div class="card">
+      <div class="summary-section">
+        <h3>📊 複勝おすすめ（${label} / 参考）</h3>
+        <p style="font-size:12px;color:#64748b;margin:0 0 10px">複勝圏内に入りやすい人気（ワイド・三連複選びの参考に）</p>
+        <div class="summary-grid">${fukuRows}</div>
+      </div>
+    </div>`;
+  }
+
   area.innerHTML = `
     <div class="card">
       <div class="summary-section">
@@ -875,6 +898,7 @@ async function loadSummary() {
         <div class="summary-grid">${overallHtml}</div>
       </div>
     </div>
+    ${fukuHtml}
     ${venueCardHtml}
     <div class="card">
       <div class="summary-section">
