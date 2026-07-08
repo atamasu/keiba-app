@@ -411,10 +411,10 @@
   <!-- 回収率分析タブ -->
   <div id="tab-analysis" style="display:none">
     <div class="period-bar">
-      <div class="period-btn" onclick="selectAnalysisPeriod(3, this)">直近3日</div>
-      <div class="period-btn" onclick="selectAnalysisPeriod(7, this)">1週間</div>
+      <div class="period-btn active" onclick="selectAnalysisPeriod('meetings3', this)">直近3回</div>
       <div class="period-btn" onclick="selectAnalysisPeriod(14, this)">2週間</div>
-      <div class="period-btn active" onclick="selectAnalysisPeriod(null, this)">全期間</div>
+      <div class="period-btn" onclick="selectAnalysisPeriod(30, this)">1ヶ月</div>
+      <div class="period-btn" onclick="selectAnalysisPeriod(null, this)">全期間</div>
     </div>
     <div class="card">
       <h2>競馬場を選択</h2>
@@ -484,7 +484,7 @@ let currentMinPop = null;
 let currentMaxPop = null;
 let currentTenkou = null;
 let currentDays = 'meetings3';
-let currentAnalysisDays = null;
+let currentAnalysisDays = 'meetings3';
 let currentToday = false;
 let collectPolling = null;
 let currentFieldSize = null;
@@ -841,6 +841,7 @@ function selectAnalysisPeriod(days, el) {
   loadStats();
 }
 
+
 function selectFilter(type, value, el) {
   if (type === 'baba') {
     currentBaba = value;
@@ -880,7 +881,8 @@ async function loadStats() {
   if (currentVenue) params.set('venue', currentVenue);
   if (currentBaba) params.set('baba', currentBaba);
   if (currentTenkou) params.set('tenkou', currentTenkou);
-  if (currentAnalysisDays) params.set('days', currentAnalysisDays);
+  if (currentAnalysisDays === 'meetings3') params.set('meetings', '3');
+  else if (currentAnalysisDays) params.set('days', currentAnalysisDays);
   const url = '/api/stats' + (params.toString() ? '?' + params.toString() : '');
   const data = await fetch(url).then(r=>r.json()).catch(()=>null);
   if (!data || !data.stats.length) {
@@ -889,7 +891,6 @@ async function loadStats() {
   const { stats, recommend, venue } = data;
   const total = stats[0]?.total_races || 0;
   const rankLabels = ['🥇','🥈','🥉','4位','5位','6位','7位','8位'];
-  const fib = [100, 200, 300, 500, 800, 1300, 2100];
 
   const recHtml = recommend.map((r, i) => {
     const roi = r.回収率;
@@ -916,10 +917,6 @@ async function loadStats() {
     </div>`;
   }).join('');
 
-  const fibSteps = fib.map((v,i) =>
-    `${i > 0 ? '<span class="arrow">→</span>' : ''}<div class="fib-step ${i===0?'first':''}">${v.toLocaleString()}円</div>`
-  ).join('');
-
   const tableRows = stats.filter(s => s.人気 <= 20).map(s => {
     const roi = s.回収率;
     const cls = roi >= 100 ? 'roi-plus' : roi >= 80 ? 'roi-good' : 'roi-low';
@@ -936,11 +933,6 @@ async function loadStats() {
     <div class="card">
       <h2>🏆 ${venue}のおすすめ（全${total}R分析）</h2>
       <div class="recommend-box">${recHtml}</div>
-      <div class="fib-box">
-        <div class="fib-title">📐 フィボナッチ法 掛け金の目安（連敗時に増額）</div>
-        <div class="fib-steps">${fibSteps}</div>
-        <div class="fib-note">1勝ごとに100円にリセット。連敗7回で2,100円まで増加。</div>
-      </div>
       <table>
         <thead><tr><th>人気</th><th>出現率</th><th>平均配当</th><th>回収率</th></tr></thead>
         <tbody>${tableRows}</tbody>
