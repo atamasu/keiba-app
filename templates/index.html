@@ -1577,6 +1577,43 @@ async function loadSanrenpuku() {
     html += '</table></div>';
   }
 
+  // 複勝 枠別おすすめ
+  const WAKU_COLORS = ['','#374151','#111827','#dc2626','#2563eb','#ca8a04','#16a34a','#ea580c','#db2777'];
+  const WAKU_BG2   = ['','#f3f4f6','#1f2937','#fee2e2','#dbeafe','#fef9c3','#dcfce7','#ffedd5','#fce7f3'];
+  const WAKU_TEXT  = ['','#111','#fff','#fff','#fff','#000','#fff','#fff','#fff'];
+  const WAKU_NAME  = ['','白','黒','赤','青','黄','緑','橙','桃'];
+
+  if (fk && fk.waku && fk.waku.length) {
+    const sortedWaku = [...fk.waku].sort((a,b) => b.回収率 - a.回収率);
+    html += `<div class="card">
+      <h2>🎨 複勝 枠別おすすめ <span style="font-size:12px;color:#64748b;font-weight:normal">(${fk.venue} / ${fk.total || ''}レース)</span></h2>
+      <p style="font-size:12px;color:#64748b;margin:0 0 10px">複勝で3着以内に入りやすい枠（回収率順）</p>
+      <table style="width:100%;border-collapse:collapse;font-size:14px">
+        <tr style="background:#f8fafc;font-size:12px;color:#64748b">
+          <th style="padding:8px 6px;text-align:left">枠</th>
+          <th style="padding:8px 6px;text-align:right">件数</th>
+          <th style="padding:8px 6px;text-align:right">出現率</th>
+          <th style="padding:8px 6px;text-align:right">平均配当</th>
+          <th style="padding:8px 6px;text-align:right">回収率</th>
+        </tr>`;
+    sortedWaku.forEach((w, i) => {
+      const wi = w.枠;
+      const bg = WAKU_BG2[wi] || '#f3f4f6';
+      const col = WAKU_TEXT[wi] || '#111';
+      const name = WAKU_NAME[wi] || wi;
+      const roiColor = w.回収率 >= 100 ? '#16a34a' : w.回収率 >= 80 ? '#d97706' : '#ef4444';
+      const badge = `<span style="display:inline-flex;align-items:center;gap:4px"><span style="display:inline-block;width:24px;height:24px;line-height:24px;text-align:center;border-radius:50%;background:${bg};color:${col};font-size:13px;font-weight:700;border:1px solid #e2e8f0">${wi}</span><span style="color:#374151">${name}枠</span></span>`;
+      html += `<tr style="border-top:1px solid #f1f5f9${i===0?' background:#fefce8':''}">
+        <td style="padding:8px 6px">${badge}</td>
+        <td style="padding:8px 6px;text-align:right">${w.出現数}件</td>
+        <td style="padding:8px 6px;text-align:right">${w.出現率}%</td>
+        <td style="padding:8px 6px;text-align:right">${w.平均配当 ? w.平均配当.toLocaleString()+'円' : '-'}</td>
+        <td style="padding:8px 6px;text-align:right;color:${roiColor};font-weight:700">${w.回収率}%</td>
+      </tr>`;
+    });
+    html += '</table></div>';
+  }
+
   // 複勝 人気別（参考）
   if (fk && fk.stats && fk.stats.length) {
     html += `<div class="card">

@@ -643,16 +643,22 @@ def load_fukusho_data(venue=None, days=None, today_only=False, meetings=None):
 
 
 def calc_fukusho_stats(rows):
-    """複勝データから人気別出現率・回収率を計算（calc_stats()と同じ形式）"""
+    """複勝データから人気別・枠別の出現率・回収率を計算"""
     race_keys = set()
     pop_count = defaultdict(int)
     pop_pay_sum = defaultdict(int)
+    waku_count = defaultdict(int)
+    waku_pay_sum = defaultdict(int)
     for row in rows:
         race_keys.add((row.get('日付', ''), row.get('競馬場', ''), row.get('R', '')))
         pop = row.get('人気', 0)
         if pop:
             pop_count[pop] += 1
             pop_pay_sum[pop] += row.get('配当円', 0)
+        waku = _safe_int(row.get('枠', 0))
+        if waku:
+            waku_count[waku] += 1
+            waku_pay_sum[waku] += row.get('配当円', 0)
     total = len(race_keys)
     stats = []
     for p in sorted(pop_count):
@@ -667,7 +673,18 @@ def calc_fukusho_stats(rows):
             "回収率": round(total_ret / total_bet * 100, 1) if total_bet else 0,
             "total_races": total
         })
-    return stats
+    waku_stats = []
+    for w in sorted(waku_count):
+        cnt = waku_count[w]
+        total_ret = waku_pay_sum[w]
+        waku_stats.append({
+            "枠": w,
+            "出現数": cnt,
+            "出現率": round(cnt / total * 100, 1) if total else 0,
+            "平均配当": round(waku_pay_sum[w] / cnt) if cnt else 0,
+            "回収率": round(total_ret / (total * 100) * 100, 1) if total else 0,
+        })
+    return {"ninki": stats, "waku": waku_stats, "total": total}
 
 
 def load_sanrenpuku_data(venue=None, days=None, today_only=False, meetings=None):
@@ -1034,9 +1051,9 @@ def api_fukusho():
     if meetings:
         dates = sorted(set(r['日付'] for r in rows), reverse=True)[:meetings]
         rows = [r for r in rows if r['日付'] in set(dates)]
-    stats = calc_fukusho_stats(rows)
-    rec = recommend(stats)
-    return jsonify({"stats": stats, "recommend": rec, "venue": venue or "全競馬場"})
+    fk = calc_fukusho_stats(rows)
+    rec = recommend(fk["ninki"])
+    return jsonify({"stats": fk["ninki"], "waku": fk["waku"], "total": fk["total"], "recommend": rec, "venue": venue or "全競馬場"})
 
 
 @app.route("/api/sanrenpuku")
