@@ -413,12 +413,10 @@
           <option value="90" selected>過去3ヶ月</option>
           <option value="180">過去半年</option>
         </select>
-        <select id="predict-min-odds" style="padding:8px 12px;border-radius:8px;border:1px solid #d1d5db;font-size:14px">
-          <option value="">オッズ下限なし</option>
-          <option value="4" selected>単勝4倍以上</option>
-          <option value="5">単勝5倍以上</option>
-          <option value="6">単勝6倍以上</option>
-          <option value="10">単勝10倍以上</option>
+        <select id="predict-wide-filter" style="padding:8px 12px;border-radius:8px;border:1px solid #d1d5db;font-size:14px">
+          <option value="4" selected>ワイド推定4倍以上</option>
+          <option value="6">ワイド推定6倍以上</option>
+          <option value="0">絞込みなし</option>
         </select>
         <button class="btn btn-primary" onclick="loadPredict()">予想を見る</button>
       </div>
@@ -597,15 +595,14 @@ function initPredictVenues() {
 
 async function loadPredict() {
   const venue    = document.getElementById('predict-venue').value;
-  const race     = document.getElementById('predict-race').value;
-  const days     = document.getElementById('predict-days').value;
-  const minOdds  = document.getElementById('predict-min-odds').value;
-  const area     = document.getElementById('predict-result');
+  const race        = document.getElementById('predict-race').value;
+  const days        = document.getElementById('predict-days').value;
+  const wideFilter  = parseFloat(document.getElementById('predict-wide-filter').value) || 0;
+  const area        = document.getElementById('predict-result');
   if (!venue) { area.innerHTML = '<p style="color:#ef4444">競馬場を選択してください</p>'; return; }
   area.innerHTML = '<div class="loading-center">出走表取得中...</div>';
   try {
-    let url = `${API}/api/race_predict?venue=${encodeURIComponent(venue)}&race=${race}&days=${days}`;
-    if (minOdds) url += `&min_odds=${minOdds}`;
+    const url = `${API}/api/race_predict?venue=${encodeURIComponent(venue)}&race=${race}&days=${days}`;
     const res = await fetch(url);
     const d = await res.json();
     if (!d.horses || d.horses.length === 0) {
@@ -614,25 +611,34 @@ async function loadPredict() {
 
     const horses  = d.horses;  // 馬番順（APIから）
     const hasOdds = d.has_odds;
-    const scoreFormula = hasOdds
-      ? 'スコア＝枠入着率×0.30＋人気入着率×0.45＋馬番入着率×0.25'
-      : 'スコア＝枠入着率×0.45＋馬番入着率×0.55（オッズ未発表のため人気を除外）';
 
-    // eligible馬のみでmaxScoreを算出
-    const eligibleHorses = horses.filter(h => h.eligible !== false);
-    const maxScore = eligibleHorses.reduce((m, h) => Math.max(m, h.score || 0), 1);
-    const minOddsLabel = minOdds ? `単勝${minOdds}倍以上` : '';
+    // スコア順でソート（ランキング参照用）
+    const byScore = [...horses].sort((a,b) => (b.score||0) - (a.score||0));
+    const maxScore = byScore[0]?.score || 1;
+
+    // 複勝オッズの最小値を取得するヘルパー（"1.5-2.3" → 1.5）
+    function fukuMin(h) {
+      if (!h.fuku_odds) return null;
+      const m = h.fuku_odds.match(/(\d+\.?\d*)/);
+      return m ? parseFloat(m[1]) : null;
+    }
+
+    // 推定ワイドオッズ = 複勝min(A) × 複勝min(B) × 0.75（控除率考慮）
+    function estWide(a, b) {
+      const fa = fukuMin(a), fb = fukuMin(b);
+      if (!fa || !fb) return null;
+      return Math.round(fa * fb * 0.75 * 10) / 10;
+    }
 
     let html = `<div style="margin-bottom:16px">
       <div style="font-size:13px;color:#6b7280;margin-bottom:8px">
-        過去${days}日の${venue}データから算出 ／ ${scoreFormula}
-        ${minOddsLabel ? `<span style="margin-left:8px;background:#fef9c3;border:1px solid #fbbf24;border-radius:4px;padding:1px 7px;color:#92400e;font-size:12px">🎯 ${minOddsLabel}で絞込み中</span>` : ''}
+        過去${days}日の${venue}データから算出
       </div>`;
 
     // オッズ未発表バナー
     if (!hasOdds) {
       html += `<div style="background:#fef9c3;border:1px solid #fbbf24;border-radius:8px;padding:10px 14px;font-size:13px;color:#92400e;margin-bottom:12px">
-        ⚠️ オッズはまだ発表されていません。発走約1時間前に更新すると単勝・複勝が表示されます。
+        ⚠️ オッズはまだ発表されていません。発走約1時間前に更新すると複勝・推定ワイドが表示されます。
       </div>`;
     }
 
@@ -670,98 +676,122 @@ async function loadPredict() {
       </div>`;
     }
 
-    // おすすめ上位3頭（eligible馬のみ）
-    const top3 = eligibleHorses.filter(h => h.score_rank && h.score_rank <= 3)
-      .sort((a,b) => a.score_rank - b.score_rank);
-    if (top3.length > 0) {
-      html += `<div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:16px">`;
-      top3.forEach((h,i) => {
-        const wi = parseInt(h.waku) || 0;
-        const bg = WAKU_BG_P[wi] || '#f3f4f6';
-        const col = WAKU_COL_P[wi] || '#111';
-        const medal = ['🥇','🥈','🥉'][i];
-        const oddsLine = hasOdds
-          ? `単勝 ${h.tan_odds ?? '-'} (${h.ninki}人気) ／ 複勝 ${h.fuku_odds || '-'}`
-          : `枠${h.waku}(${WAKU_NAME_P[wi]})`;
+    // ── ワイド推奨ペア ──────────────────────────────
+    // スコア上位5頭から全ペアを生成してワイド推定オッズで絞込み・ソート
+    const top5 = byScore.slice(0, 5);
+    const pairs = [];
+    for (let i = 0; i < top5.length; i++) {
+      for (let j = i+1; j < top5.length; j++) {
+        const a = top5[i], b = top5[j];
+        const ew = hasOdds ? estWide(a, b) : null;
+        pairs.push({ a, b, combinedScore: (a.score||0)+(b.score||0), estWide: ew });
+      }
+    }
+    // ワイドオッズあり→推定値でソート, なし→combinedScoreでソート
+    const sortedPairs = pairs.sort((x,y) =>
+      hasOdds ? ((y.estWide||0)-(x.estWide||0)) : ((y.combinedScore)-(x.combinedScore))
+    );
+    // フィルター: wideFilter倍以上、またはオッズ未発表
+    const filteredPairs = wideFilter > 0 && hasOdds
+      ? sortedPairs.filter(p => p.estWide !== null && p.estWide >= wideFilter)
+      : sortedPairs;
+    const showPairs = filteredPairs.slice(0, 3);
 
-        // 推薦理由：3要素のうち高い順に文章生成
-        const factors = [
-          { label: `枠${h.waku}の入着率`, val: h.waku_rate,  weight: hasOdds ? 0.30 : 0.45 },
-          { label: `${h.ninki}番人気の入着率`, val: h.ninki_rate, weight: 0.45 },
-          { label: `馬番${h.umaban}の入着率`, val: h.umaban_rate, weight: hasOdds ? 0.25 : 0.55 },
-        ].filter(f => f.val > 0 && (hasOdds || f.label !== `${h.ninki}番人気の入着率`))
-         .sort((a,b) => (b.val * b.weight) - (a.val * a.weight));
+    html += `<div style="margin-bottom:16px">
+      <div style="font-size:14px;font-weight:700;color:#1e40af;margin-bottom:8px">
+        🎯 ワイド推奨ペア${wideFilter > 0 && hasOdds ? `（推定${wideFilter}倍以上）` : ''}
+      </div>`;
 
-        const reasonLines = factors.slice(0,2).map(f =>
-          `<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:3px">
-            <span style="opacity:.8;font-size:11px">${f.label}</span>
-            <strong style="font-size:12px">${f.val}%</strong>
-          </div>`
-        ).join('');
+    if (showPairs.length === 0) {
+      html += `<div style="background:#fef2f2;border:1px solid #fca5a5;border-radius:10px;padding:12px 14px;font-size:13px;color:#991b1b;margin-bottom:12px">
+        推定${wideFilter}倍以上のペアがありません。絞込みを緩めてください。
+      </div>`;
+    } else {
+      const pairColors = ['#1e40af','#065f46','#7c3aed'];
+      const pairBgs   = ['#eff6ff','#ecfdf5','#f5f3ff'];
+      showPairs.forEach((p, pi) => {
+        const { a, b, estWide: ew } = p;
+        const wideLabel = ew !== null
+          ? `<span style="font-size:18px;font-weight:700;color:${pairColors[pi]}">推定 ${ew}倍</span>`
+          : `<span style="font-size:13px;color:#6b7280">（オッズ発表後に表示）</span>`;
 
-        html += `<div style="flex:1;min-width:160px;padding:14px;border-radius:12px;background:${bg};color:${col};box-shadow:0 2px 8px rgba(0,0,0,.1)">
-          <div style="font-size:20px;margin-bottom:2px">${medal}</div>
-          <div style="font-size:22px;font-weight:700">${h.umaban}番 ${h.name || ''}</div>
-          <div style="font-size:12px;margin:6px 0;opacity:.85">${oddsLine}</div>
-          <div style="border-top:1px solid rgba(255,255,255,.3);margin:8px 0;padding-top:8px">
-            <div style="font-size:10px;opacity:.7;margin-bottom:4px">📌 推薦理由</div>
-            ${reasonLines}
+        const horseChip = (h) => {
+          const wi = parseInt(h.waku)||0;
+          const bg = WAKU_BG_P[wi]||'#f3f4f6';
+          const col= WAKU_COL_P[wi]||'#111';
+          const fuku = h.fuku_odds ? `複勝 ${h.fuku_odds}` : '';
+          return `<div style="display:flex;align-items:center;gap:8px;padding:8px 10px;background:#fff;border-radius:8px;margin-bottom:6px">
+            <span style="width:28px;height:28px;border-radius:50%;background:${bg};color:${col};display:inline-flex;align-items:center;justify-content:center;font-size:13px;font-weight:700;flex-shrink:0">${h.waku}</span>
+            <div>
+              <div style="font-weight:700;font-size:14px">${h.umaban}番 ${h.name||''}</div>
+              <div style="font-size:11px;color:#6b7280">${hasOdds ? `単勝${h.tan_odds||'-'}(${h.ninki||'-'}人気) ${fuku}` : `スコア${h.score}`}</div>
+            </div>
+            <div style="margin-left:auto;font-size:11px;color:#6b7280">スコア<br><strong>${h.score}</strong></div>
+          </div>`;
+        };
+
+        // 推薦理由（スコア寄与が高い要素）
+        const reasons = [];
+        if (a.waku_rate > 35 || b.waku_rate > 35) reasons.push(`枠の入着率が高い`);
+        if (hasOdds && (a.ninki_rate > 40 || b.ninki_rate > 40)) reasons.push(`人気帯の入着率が安定`);
+        if (a.umaban_rate > 30 || b.umaban_rate > 30) reasons.push(`馬番の入着率が高い`);
+        const reasonText = reasons.length ? reasons.join('・') : `スコア上位の組み合わせ`;
+
+        html += `<div style="background:${pairBgs[pi]};border:1.5px solid ${pairColors[pi]}33;border-radius:12px;padding:14px;margin-bottom:10px">
+          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">
+            <span style="font-size:13px;font-weight:700;color:${pairColors[pi]}">ペア ${pi+1}</span>
+            ${wideLabel}
           </div>
-          <div style="font-size:11px;margin-top:6px;opacity:.8">総合スコア: <strong>${h.score}</strong></div>
+          ${horseChip(a)}
+          <div style="text-align:center;font-size:12px;color:#6b7280;margin:2px 0">× ワイド ×</div>
+          ${horseChip(b)}
+          <div style="margin-top:8px;font-size:11px;color:#6b7280;background:#fff;border-radius:6px;padding:6px 10px">
+            📌 ${reasonText}
+          </div>
         </div>`;
       });
-      html += '</div>';
-    } else if (minOdds && hasOdds) {
-      html += `<div style="background:#fef2f2;border:1px solid #fca5a5;border-radius:10px;padding:12px 14px;margin-bottom:14px;font-size:13px;color:#991b1b">
-        🎯 単勝${minOdds}倍以上の馬がいないか、オッズ未発表です。絞込みを緩めてみてください。
-      </div>`;
     }
+    html += `</div>`;
 
-    // 全馬テーブル（馬番順）
+    // ── 全馬テーブル ───────────────────────────────
     const oddsHeader = hasOdds
       ? '<th style="padding:8px;text-align:center">単勝</th><th style="padding:8px;text-align:center">複勝</th><th style="padding:8px;text-align:center">人気</th>'
       : '';
-    html += `<div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;font-size:13px">
+    html += `<details style="margin-bottom:16px">
+      <summary style="cursor:pointer;font-size:13px;color:#374151;padding:8px 0;font-weight:600">全馬スコア一覧 ▼</summary>
+      <div style="overflow-x:auto;margin-top:8px"><table style="width:100%;border-collapse:collapse;font-size:13px">
       <thead><tr style="background:#f3f4f6">
         <th style="padding:8px;text-align:center">馬番</th>
         <th style="padding:8px;text-align:center">枠</th>
         <th style="padding:8px;text-align:left">馬名</th>
         ${oddsHeader}
-        <th style="padding:8px;text-align:center">枠入着率</th>
-        <th style="padding:8px;text-align:center">人気入着率</th>
-        <th style="padding:8px;text-align:center">馬番入着率</th>
-        <th style="padding:8px;text-align:center">スコア(順位)</th>
+        <th style="padding:8px;text-align:center">枠%</th>
+        <th style="padding:8px;text-align:center">人気%</th>
+        <th style="padding:8px;text-align:center">馬番%</th>
+        <th style="padding:8px;text-align:center">スコア</th>
       </tr></thead><tbody>`;
 
     horses.forEach(h => {
-      const wi       = parseInt(h.waku) || 0;
-      const bg       = WAKU_BG_P[wi] || '#f3f4f6';
-      const col      = WAKU_COL_P[wi] || '#111';
-      const eligible = h.eligible !== false;
-      const rank     = h.score_rank;
-      const barW     = (eligible && maxScore > 0) ? Math.round((h.score || 0) / maxScore * 100) : 0;
-
-      // 対象外馬（オッズ下限未満）はグレーアウト
-      const rowOpacity = eligible ? '' : 'opacity:0.35;';
-      const rankBadge = !eligible
-        ? `<span style="font-size:11px;color:#9ca3af;margin-left:4px">対象外</span>`
-        : rank <= 3
-          ? `<span style="font-size:11px;background:#6366f1;color:#fff;border-radius:10px;padding:1px 6px;margin-left:4px">${rank}位</span>`
-          : `<span style="font-size:11px;color:#9ca3af;margin-left:4px">${rank}位</span>`;
-      const rowBg = !eligible ? '' : rank <= 3 ? ';background:#f5f3ff' : '';
-
+      const wi   = parseInt(h.waku) || 0;
+      const bg   = WAKU_BG_P[wi] || '#f3f4f6';
+      const col  = WAKU_COL_P[wi] || '#111';
+      const rank = h.score_rank || (byScore.findIndex(x=>x.umaban===h.umaban)+1);
+      const barW = maxScore > 0 ? Math.round((h.score||0) / maxScore * 100) : 0;
+      const isTop= rank <= 3;
+      const rankBadge = isTop
+        ? `<span style="font-size:11px;background:#6366f1;color:#fff;border-radius:10px;padding:1px 6px;margin-left:4px">${rank}位</span>`
+        : `<span style="font-size:11px;color:#9ca3af;margin-left:4px">${rank}位</span>`;
       const oddsCells = hasOdds
         ? `<td style="padding:8px;text-align:center;font-weight:700">${h.tan_odds ?? '-'}</td>
            <td style="padding:8px;text-align:center;font-size:12px">${h.fuku_odds || '-'}</td>
            <td style="padding:8px;text-align:center">${h.ninki || '-'}</td>`
         : '';
-      const barColor = eligible ? '#6366f1' : '#d1d5db';
-      html += `<tr style="border-bottom:1px solid #f3f4f6;${rowOpacity}${rowBg}">
+      html += `<tr style="border-bottom:1px solid #f3f4f6${isTop?';background:#f5f3ff':''}">
         <td style="padding:8px;text-align:center;font-weight:700">${h.umaban}</td>
         <td style="padding:8px;text-align:center">
           <span style="display:inline-block;width:26px;height:26px;border-radius:50%;background:${bg};color:${col};line-height:26px;font-size:12px;font-weight:700">${h.waku}</span>
         </td>
-        <td style="padding:8px;font-weight:${eligible && rank<=3?'700':'400'}">${h.name || '-'}</td>
+        <td style="padding:8px;font-weight:${isTop?'700':'400'}">${h.name || '-'}</td>
         ${oddsCells}
         <td style="padding:8px;text-align:center">${h.waku_rate}%</td>
         <td style="padding:8px;text-align:center">${h.ninki_rate}%</td>
@@ -769,7 +799,7 @@ async function loadPredict() {
         <td style="padding:8px;text-align:center">
           <div style="display:flex;align-items:center;gap:4px">
             <div style="flex:1;height:8px;background:#e5e7eb;border-radius:4px">
-              <div style="width:${barW}%;height:8px;background:${barColor};border-radius:4px"></div>
+              <div style="width:${barW}%;height:8px;background:#6366f1;border-radius:4px"></div>
             </div>
             <span style="font-weight:700;min-width:28px">${h.score}</span>
             ${rankBadge}
@@ -777,7 +807,7 @@ async function loadPredict() {
         </td>
       </tr>`;
     });
-    html += '</tbody></table></div></div>';
+    html += '</tbody></table></div></details></div>';
     area.innerHTML = html;
   } catch(e) {
     area.innerHTML = `<p style="color:#ef4444">エラー: ${e.message}</p>`;
