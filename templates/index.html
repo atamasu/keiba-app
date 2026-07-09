@@ -623,11 +623,12 @@ async function loadPredict() {
       return m ? parseFloat(m[1]) : null;
     }
 
-    // 推定ワイドオッズ = 複勝min(A) × 複勝min(B) × 0.75（控除率考慮）
+    // 推定ワイドオッズ（目安）: 複勝min同士の積 × 0.5
+    // ワイドは2頭同時入着なので複勝の単純積より実際は低くなる傾向があるため係数0.5
     function estWide(a, b) {
       const fa = fukuMin(a), fb = fukuMin(b);
       if (!fa || !fb) return null;
-      return Math.round(fa * fb * 0.75 * 10) / 10;
+      return Math.round(fa * fb * 0.5 * 10) / 10;
     }
 
     let html = `<div style="margin-bottom:16px">
@@ -687,13 +688,11 @@ async function loadPredict() {
         pairs.push({ a, b, combinedScore: (a.score||0)+(b.score||0), estWide: ew });
       }
     }
-    // ワイドオッズあり→推定値でソート, なし→combinedScoreでソート
-    const sortedPairs = pairs.sort((x,y) =>
-      hasOdds ? ((y.estWide||0)-(x.estWide||0)) : ((y.combinedScore)-(x.combinedScore))
-    );
-    // フィルター: wideFilter倍以上、またはオッズ未発表
+    // combinedScore優先でソート（スコアが高い組み合わせを本命とする）
+    const sortedPairs = pairs.sort((x,y) => y.combinedScore - x.combinedScore);
+    // フィルター: wideFilter倍以上のみ（null=複勝未発表は残す）、オッズ未発表時はフィルターなし
     const filteredPairs = wideFilter > 0 && hasOdds
-      ? sortedPairs.filter(p => p.estWide !== null && p.estWide >= wideFilter)
+      ? sortedPairs.filter(p => p.estWide === null || p.estWide >= wideFilter)
       : sortedPairs;
     const showPairs = filteredPairs.slice(0, 3);
 
@@ -712,8 +711,8 @@ async function loadPredict() {
       showPairs.forEach((p, pi) => {
         const { a, b, estWide: ew } = p;
         const wideLabel = ew !== null
-          ? `<span style="font-size:18px;font-weight:700;color:${pairColors[pi]}">推定 ${ew}倍</span>`
-          : `<span style="font-size:13px;color:#6b7280">（オッズ発表後に表示）</span>`;
+          ? `<div style="text-align:right"><span style="font-size:18px;font-weight:700;color:${pairColors[pi]}">推定 ${ew}倍</span><div style="font-size:10px;color:#9ca3af;margin-top:1px">※複勝から算出した目安</div></div>`
+          : `<span style="font-size:13px;color:#6b7280">（複勝発表後に表示）</span>`;
 
         const horseChip = (h) => {
           const wi = parseInt(h.waku)||0;
