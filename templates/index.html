@@ -602,7 +602,9 @@ async function loadPredict() {
       area.innerHTML = `<p style="color:#ef4444">${d.error || '出走表を取得できませんでした'}</p>`; return;
     }
 
-    const horses = d.horses;  // すでにスコア順
+    const horses = d.horses;  // スコア順（APIから）
+    // テーブル表示用に馬番順へ並び替え
+    const horsesByUmaban = [...horses].sort((a,b) => parseInt(a.umaban) - parseInt(b.umaban));
     const maxScore = horses[0]?.score || 1;
     const hasOdds = d.has_odds;
     const scoreFormula = hasOdds
@@ -641,7 +643,11 @@ async function loadPredict() {
     });
     html += '</div>';
 
-    // 全馬テーブル
+    // 全馬テーブル（馬番順、スコア順位列付き）
+    // scoreRankMap: umaban → スコア順位
+    const scoreRankMap = {};
+    horses.forEach((h, i) => { scoreRankMap[h.umaban] = i + 1; });
+
     const oddsHeader = hasOdds
       ? '<th style="padding:8px;text-align:center">単勝</th><th style="padding:8px;text-align:center">複勝</th><th style="padding:8px;text-align:center">人気</th>'
       : '';
@@ -654,35 +660,40 @@ async function loadPredict() {
         <th style="padding:8px;text-align:center">枠入着率</th>
         <th style="padding:8px;text-align:center">人気入着率</th>
         <th style="padding:8px;text-align:center">馬番入着率</th>
-        <th style="padding:8px;text-align:center">スコア</th>
+        <th style="padding:8px;text-align:center">スコア(順位)</th>
       </tr></thead><tbody>`;
 
-    horses.forEach(h => {
+    horsesByUmaban.forEach(h => {
       const wi = parseInt(h.waku) || 0;
       const bg = WAKU_BG_P[wi] || '#f3f4f6';
       const col = WAKU_COL_P[wi] || '#111';
       const barW = maxScore > 0 ? Math.round(h.score / maxScore * 100) : 0;
+      const rank = scoreRankMap[h.umaban] || '-';
+      const rankBadge = rank <= 3
+        ? `<span style="font-size:11px;background:#6366f1;color:#fff;border-radius:10px;padding:1px 6px;margin-left:4px">${rank}位</span>`
+        : `<span style="font-size:11px;color:#9ca3af;margin-left:4px">${rank}位</span>`;
       const oddsCells = hasOdds
         ? `<td style="padding:8px;text-align:center;font-weight:700">${h.tan_odds ?? '-'}</td>
            <td style="padding:8px;text-align:center;font-size:12px">${h.fuku_odds || '-'}</td>
            <td style="padding:8px;text-align:center">${h.ninki || '-'}</td>`
         : '';
-      html += `<tr style="border-bottom:1px solid #f3f4f6">
+      html += `<tr style="border-bottom:1px solid #f3f4f6${rank <= 3 ? ';background:#f5f3ff' : ''}">
         <td style="padding:8px;text-align:center;font-weight:700">${h.umaban}</td>
         <td style="padding:8px;text-align:center">
           <span style="display:inline-block;width:26px;height:26px;border-radius:50%;background:${bg};color:${col};line-height:26px;font-size:12px;font-weight:700">${h.waku}</span>
         </td>
-        <td style="padding:8px">${h.name || '-'}</td>
+        <td style="padding:8px;font-weight:${rank<=3?'700':'400'}">${h.name || '-'}</td>
         ${oddsCells}
         <td style="padding:8px;text-align:center">${h.waku_rate}%</td>
         <td style="padding:8px;text-align:center">${h.ninki_rate}%</td>
         <td style="padding:8px;text-align:center">${h.umaban_rate}%</td>
         <td style="padding:8px;text-align:center">
-          <div style="display:flex;align-items:center;gap:6px">
+          <div style="display:flex;align-items:center;gap:4px">
             <div style="flex:1;height:8px;background:#e5e7eb;border-radius:4px">
               <div style="width:${barW}%;height:8px;background:#6366f1;border-radius:4px"></div>
             </div>
-            <span style="font-weight:700;min-width:32px">${h.score}</span>
+            <span style="font-weight:700;min-width:28px">${h.score}</span>
+            ${rankBadge}
           </div>
         </td>
       </tr>`;

@@ -1179,9 +1179,11 @@ def parse_deba_table(html):
         if not re.match(r'^\d+$', umaban):
             continue
 
-        # 馬名
-        name_raw = tds[umaban_idx + 1].get_text(strip=True) if len(tds) > umaban_idx + 1 else ""
-        name = re.split(r'[\s　]', name_raw)[0] if name_raw else ""
+        # 馬名: セルの最初のテキストノードだけ取る（<br>で馬齢・毛色が続くため get_text は使わない）
+        name = ""
+        if len(tds) > umaban_idx + 1:
+            name_td = tds[umaban_idx + 1]
+            name = next((s.strip() for s in name_td.strings if s.strip()), "")
 
         # オッズ列 (class=odds_weight)
         odds_td = tr.find("td", class_="odds_weight")
