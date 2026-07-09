@@ -1333,11 +1333,12 @@ def parse_deba_table(html):
     return sorted(horses, key=lambda x: int(x["umaban"]) if x["umaban"].isdigit() else 99)
 
 
-def calc_prerace_score(horses, venue_name, days=90, min_odds=None):
+def calc_prerace_score(horses, venue_name, days=90, min_odds=None, today_trend=None):
     """
     各馬にスコアを付ける。
     オッズあり: 枠入着率×0.30 + 人気入着率×0.45 + 馬番入着率×0.25
     オッズなし: 枠入着率×0.45 + 馬番入着率×0.55
+    today_trend: 当日完了レースの傾向（枠・馬番ホットリスト）。完了数に応じてスコアに加算。
     min_odds: この値未満の単勝オッズの馬は eligible=False とする
     """
     cutoff = (date.today() - timedelta(days=days)).isoformat()
@@ -1378,6 +1379,12 @@ def calc_prerace_score(horses, venue_name, days=90, min_odds=None):
 
     has_odds = any(h["tan_odds"] is not None for h in horses)
 
+    # 今日の傾向バイアス（完了レースが増えるほど信頼度UP、5レースで最大）
+    trend_waku   = today_trend.get("hot_waku",   [])[:3] if today_trend else []
+    trend_umaban = today_trend.get("hot_umaban", [])[:3] if today_trend else []
+    trend_races  = today_trend.get("completed_races", 0) if today_trend else 0
+    reliability  = min(trend_races / 5.0, 1.0)  # 0〜1.0（5R完了で100%）
+
     for h in horses:
         wr = waku_rate.get(h["waku"], 0)
         ur = umaban_rate.get(h["umaban"], 0)
@@ -1388,10 +1395,17 @@ def calc_prerace_score(horses, venue_name, days=90, min_odds=None):
         else:
             score = wr * 0.45 + ur * 0.55
 
-        h["score"] = round(score, 1)
-        h["waku_rate"] = round(wr, 1)
-        h["ninki_rate"] = round(nr, 1)
-        h["umaban_rate"] = round(ur, 1)
+        # 今日バイアス補正（枠・馬番のホットランクに応じて最大+8点、信頼度で按分）
+        waku_bonus   = [4, 2, 1][trend_waku.index(h["waku"])]     if h["waku"]   in trend_waku   else 0
+        umaban_bonus = [4, 2, 1][trend_umaban.index(h["umaban"])] if h["umaban"] in trend_umaban else 0
+        trend_bonus  = round((waku_bonus + umaban_bonus) * reliability, 1)
+
+        h["score"]        = round(score + trend_bonus, 1)
+        h["base_score"]   = round(score, 1)
+        h["trend_bonus"]  = trend_bonus
+        h["waku_rate"]    = round(wr, 1)
+        h["ninki_rate"]   = round(nr, 1)
+        h["umaban_rate"]  = round(ur, 1)
 
         # 最低オッズフィルター: tan_oddsがあり閾値未満ならeligible=False
         if min_odds and h["tan_odds"] is not None:
@@ -1425,9 +1439,9 @@ def api_race_predict():
     if not horses:
         return jsonify({"error": "出走表を取得できませんでした（開催日・レース番号を確認してください）", "horses": []}), 200
 
-    has_odds = any(h["tan_odds"] is not None for h in horses)
-    scored = calc_prerace_score(horses, venue, days=days, min_odds=min_odds)
+    has_odds    = any(h["tan_odds"] is not None for h in horses)
     today_trend = _calc_today_trend(venue)
+    scored      = calc_prerace_score(horses, venue, days=days, min_odds=min_odds, today_trend=today_trend)
     patterns = _calc_venue_patterns(venue, days=days)
     return jsonify({
         "venue": venue,
@@ -1441,12 +1455,12 @@ def api_race_predict():
 
 
 PREDICT_LOG_FILE = os.path.join(DATA_DIR, "predict_log.csv")
-PREDICT_LOG_FIELDS = ["date", "venue", "race", "rank1", "rank2", "rank3", "logged_at"]
+PREDICT_LOG_FIELDS = ["date", "venue", "race", "rank1", "rank2", "rank3", "ana_pick", "logged_at"]
 _predict_log_lock = threading.Lock()
 
 
-def _append_predict_log(date_str, venue, race, rank1, rank2, rank3):
-    """予想ログ（スコア上位3頭のumaban）をCSVに追記する。同日同レースは上書き。"""
+def _append_predict_log(date_str, venue, race, rank1, rank2, rank3, ana_pick=""):
+    """予想ログ（スコア上位3頭のumaban＋穴馬候補）をCSVに追記する。同日同レースは上書き。"""
     rows = []
     if os.path.exists(PREDICT_LOG_FILE):
         try:
@@ -1460,6 +1474,7 @@ def _append_predict_log(date_str, venue, race, rank1, rank2, rank3):
     rows.append({
         "date": date_str, "venue": venue, "race": str(race),
         "rank1": rank1, "rank2": rank2, "rank3": rank3,
+        "ana_pick": ana_pick,
         "logged_at": _dt.datetime.now().strftime("%H:%M"),
     })
     with open(PREDICT_LOG_FILE, "w", encoding="utf-8", newline="") as f:
@@ -1475,6 +1490,7 @@ def api_log_prediction():
     venue    = data.get("venue", "")
     race     = data.get("race", 0)
     top3     = data.get("top3", [])   # umaban文字列リスト（スコア順1〜3位）
+    ana_pick = data.get("ana_pick", "")  # 穴馬候補umaban
     if not venue or not race or not top3:
         return jsonify({"ok": False}), 400
     r1 = top3[0] if len(top3) > 0 else ""
@@ -1482,7 +1498,7 @@ def api_log_prediction():
     r3 = top3[2] if len(top3) > 2 else ""
     with _predict_log_lock:
         try:
-            _append_predict_log(date.today().isoformat(), venue, race, r1, r2, r3)
+            _append_predict_log(date.today().isoformat(), venue, race, r1, r2, r3, ana_pick)
         except Exception as e:
             return jsonify({"ok": False, "error": str(e)}), 500
     return jsonify({"ok": True})
@@ -1528,15 +1544,18 @@ def api_predict_results():
                 pass
 
         if result_row:
-            actual = {result_row.get("馬番1",""), result_row.get("馬番2",""), result_row.get("馬番3","")} - {""}
-            matched = pred & actual
-            is_hit  = len(matched) >= 2
-            total  += 1
+            actual    = {result_row.get("馬番1",""), result_row.get("馬番2",""), result_row.get("馬番3","")} - {""}
+            matched   = pred & actual
+            is_hit    = len(matched) >= 2
+            ana_pick  = log.get("ana_pick", "")
+            ana_hit   = (ana_pick in actual) if ana_pick else None
+            total    += 1
             if is_hit: hit += 1
             records.append({
                 "date": d_str, "venue": venue, "race": race,
                 "pred": sorted(pred), "actual": sorted(actual),
                 "matched": sorted(matched), "hit": is_hit,
+                "ana_pick": ana_pick, "ana_hit": ana_hit,
                 "ninki1": result_row.get("人気1",""), "ninki2": result_row.get("人気2",""), "ninki3": result_row.get("人気3",""),
             })
         else:

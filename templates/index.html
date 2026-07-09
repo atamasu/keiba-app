@@ -629,12 +629,16 @@ async function loadPredict() {
     // スコア順でソート（ランキング参照用）
     const byScore = [...horses].sort((a,b) => (b.score||0) - (a.score||0));
 
-    // 予想ログ送信（スコア上位3頭のumabanを記録）
+    // 穴馬候補: 5番人気以降でスコア最高の馬
+    const anaCandidates = byScore.filter(h => h.ninki && parseInt(h.ninki) >= 5);
+    const anaPick = anaCandidates[0] || null;
+
+    // 予想ログ送信（スコア上位3頭 + 穴馬候補のumabanを記録）
     const top3umabans = byScore.slice(0,3).map(h => h.umaban);
     fetch(`${API}/api/log_prediction`, {
       method: 'POST',
       headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({ venue, race: parseInt(race), top3: top3umabans })
+      body: JSON.stringify({ venue, race: parseInt(race), top3: top3umabans, ana_pick: anaPick?.umaban || '' })
     }).catch(()=>{});
     const maxScore = byScore[0]?.score || 1;
 
@@ -689,13 +693,56 @@ async function loadPredict() {
       }).join('');
       const wakuSection = wakuItems ? `<div style="margin-bottom:6px;font-size:12px;color:#374151">🔲 入着枠（上位3）</div><div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:10px">${wakuItems}</div>` : '';
       const umaSection  = umaItems  ? `<div style="margin-bottom:6px;font-size:12px;color:#374151">🐴 入着馬番（上位3）</div><div style="display:flex;gap:6px;flex-wrap:wrap">${umaItems}</div>` : '';
+      // 信頼度バー（完了レース数に応じて0→100%）
+      const reliability = Math.min(tt.completed_races / 5, 1.0);
+      const reliabilityPct = Math.round(reliability * 100);
+      const reliabilityColor = reliabilityPct >= 80 ? '#16a34a' : reliabilityPct >= 40 ? '#d97706' : '#9ca3af';
+      const reliabilityBar = `
+        <div style="margin-top:10px;border-top:1px solid #a7f3d0;padding-top:8px">
+          <div style="display:flex;justify-content:space-between;font-size:11px;color:#065f46;margin-bottom:3px">
+            <span>傾向の信頼度（スコア補正の強さ）</span>
+            <strong style="color:${reliabilityColor}">${reliabilityPct}%</strong>
+          </div>
+          <div style="height:6px;background:#d1fae5;border-radius:3px">
+            <div style="width:${reliabilityPct}%;height:6px;background:${reliabilityColor};border-radius:3px;transition:width .3s"></div>
+          </div>
+          <div style="font-size:10px;color:#6b7280;margin-top:3px">5レース完了で最大補正。後半ほどスコアが今日の流れを反映します。</div>
+        </div>`;
       html += `<div style="background:#ecfdf5;border:1px solid #6ee7b7;border-radius:10px;padding:12px 14px;margin-bottom:14px">
         <div style="font-size:13px;font-weight:700;color:#065f46;margin-bottom:8px">📊 今日の傾向（${venue} ／ 完了${tt.completed_races}R）</div>
-        ${wakuSection}${umaSection}
+        ${wakuSection}${umaSection}${reliabilityBar}
       </div>`;
     } else {
       html += `<div style="background:#f3f4f6;border-radius:10px;padding:10px 14px;font-size:13px;color:#6b7280;margin-bottom:14px">
         📊 今日の傾向: まだ完了レースがありません（レース後に自動更新されます）
+      </div>`;
+    }
+
+    // ── 穴馬候補 ─────────────────────────────────────
+    if (anaPick && hasOdds) {
+      const wi  = parseInt(anaPick.waku) || 0;
+      const bg  = WAKU_BG_P[wi] || '#f3f4f6';
+      const col = WAKU_COL_P[wi] || '#111';
+      const anaBonus = anaPick.trend_bonus > 0
+        ? `<span style="font-size:11px;background:#fef9c3;color:#92400e;border-radius:4px;padding:1px 6px;margin-left:4px">今日の流れ+${anaPick.trend_bonus}</span>`
+        : '';
+      html += `<div style="background:#fff7ed;border:1.5px solid #fb923c;border-radius:12px;padding:14px;margin-bottom:14px">
+        <div style="font-size:13px;font-weight:700;color:#c2410c;margin-bottom:10px">🎲 穴馬候補（5番人気以降）</div>
+        <div style="display:flex;align-items:center;gap:10px">
+          <span style="width:36px;height:36px;border-radius:50%;background:${bg};color:${col};display:inline-flex;align-items:center;justify-content:center;font-size:15px;font-weight:700;flex-shrink:0">${anaPick.waku}</span>
+          <div style="flex:1">
+            <div style="font-size:18px;font-weight:700">${anaPick.umaban}番 ${anaPick.name || ''} ${anaBonus}</div>
+            <div style="font-size:12px;color:#6b7280;margin-top:2px">
+              単勝 ${anaPick.tan_odds || '-'}（${anaPick.ninki}番人気）／ 複勝 ${anaPick.fuku_odds || '-'}
+            </div>
+          </div>
+          <div style="text-align:right;font-size:12px;color:#6b7280">
+            スコア<br><strong style="font-size:16px;color:#c2410c">${anaPick.score}</strong>
+          </div>
+        </div>
+        <div style="margin-top:8px;font-size:11px;color:#9a3412;background:#fff;border-radius:6px;padding:6px 10px">
+          ※3着以内に入れば的中としてログに記録されます
+        </div>
       </div>`;
     }
 
@@ -2029,18 +2076,25 @@ async function loadHitRate() {
     }
 
     const hitRateColor = d.hit_rate >= 40 ? '#16a34a' : d.hit_rate >= 25 ? '#d97706' : '#ef4444';
+    const anaRecs  = d.records.filter(r => r.actual && r.ana_pick);
+    const anaTotal = anaRecs.length;
+    const anaHit   = anaRecs.filter(r => r.ana_hit).length;
+    const anaRate  = anaTotal > 0 ? Math.round(anaHit / anaTotal * 100) : null;
+    const anaColor = anaRate >= 35 ? '#16a34a' : anaRate >= 20 ? '#d97706' : '#ef4444';
     let html = `
-      <div style="display:flex;gap:16px;margin-bottom:16px;flex-wrap:wrap">
-        <div style="text-align:center;padding:12px 20px;background:#f3f4f6;border-radius:10px;flex:1;min-width:80px">
-          <div style="font-size:28px;font-weight:700;color:${hitRateColor}">${d.hit_rate}%</div>
-          <div style="font-size:12px;color:#6b7280;margin-top:2px">ワイド的中率</div>
+      <div style="display:flex;gap:10px;margin-bottom:16px;flex-wrap:wrap">
+        <div style="text-align:center;padding:12px 16px;background:#f3f4f6;border-radius:10px;flex:1;min-width:70px">
+          <div style="font-size:26px;font-weight:700;color:${hitRateColor}">${d.hit_rate}%</div>
+          <div style="font-size:11px;color:#6b7280;margin-top:2px">ワイド的中率</div>
+          <div style="font-size:11px;color:#9ca3af">${d.hit}/${d.total}件</div>
         </div>
-        <div style="text-align:center;padding:12px 20px;background:#f3f4f6;border-radius:10px;flex:1;min-width:80px">
-          <div style="font-size:28px;font-weight:700;color:#1e40af">${d.hit}/${d.total}</div>
-          <div style="font-size:12px;color:#6b7280;margin-top:2px">的中/予想数</div>
+        <div style="text-align:center;padding:12px 16px;background:#fff7ed;border:1px solid #fb923c;border-radius:10px;flex:1;min-width:70px">
+          <div style="font-size:26px;font-weight:700;color:${anaRate !== null ? anaColor : '#9ca3af'}">${anaRate !== null ? anaRate+'%' : '-'}</div>
+          <div style="font-size:11px;color:#c2410c;margin-top:2px">穴馬的中率</div>
+          <div style="font-size:11px;color:#9ca3af">${anaHit}/${anaTotal}件</div>
         </div>
       </div>
-      <div style="font-size:12px;color:#6b7280;margin-bottom:8px">※スコア上位3頭のうち2頭以上が3着以内 ＝ 的中</div>`;
+      <div style="font-size:11px;color:#6b7280;margin-bottom:10px">ワイド: 上位3頭から2頭以上が3着以内 ／ 穴馬: 候補が3着以内</div>`;
 
     // 直近10件の詳細
     const recent = d.records.filter(r => r.actual !== null).slice(0, 10);
@@ -2053,15 +2107,22 @@ async function loadHitRate() {
           : `<span style="background:#fee2e2;color:#991b1b;border-radius:6px;padding:2px 8px;font-size:12px">ハズレ</span>`;
         const predStr  = r.pred.join('・') + '番';
         const actStr   = r.actual.join('・') + '番';
-        const matchStr = r.matched.length ? `(一致: ${r.matched.join('・')}番)` : '';
+        const matchStr = r.matched.length ? `一致: ${r.matched.join('・')}番` : '';
+        const anaStr   = r.ana_pick
+          ? (r.ana_hit
+              ? `<span style="color:#c2410c;font-weight:700">🎲 穴馬${r.ana_pick}番 ✅的中</span>`
+              : `<span style="color:#9ca3af">🎲 穴馬${r.ana_pick}番 ハズレ</span>`)
+          : '';
         html += `<div style="padding:8px 10px;border:1px solid #e5e7eb;border-radius:8px;margin-bottom:6px;${isHit?'background:#f0fdf4':''}">
           <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px">
             <span style="font-weight:600;font-size:13px">${r.date} ${r.venue} ${r.race}R</span>
             ${hitLabel}
           </div>
           <div style="font-size:12px;color:#6b7280">
-            予想: <strong>${predStr}</strong> → 結果: ${actStr} ${matchStr}
+            予想: <strong>${predStr}</strong> → 結果: ${actStr}
+            ${matchStr ? `<span style="color:#16a34a;margin-left:4px">(${matchStr})</span>` : ''}
           </div>
+          ${anaStr ? `<div style="font-size:12px;margin-top:3px">${anaStr}</div>` : ''}
         </div>`;
       });
     }
