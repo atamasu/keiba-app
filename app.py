@@ -1271,26 +1271,27 @@ def parse_deba_table(html):
         if not tds:
             continue
 
-        first_td = tds[0]
-        first = first_td.get_text(strip=True).translate(_z2h)
-        first_classes = set(first_td.get("class") or [])
+        # 行の中に waku[1-8] クラスを持つtdを探す
+        waku_td = None
+        for td in tds:
+            td_cls = " ".join(td.get("class") or [])
+            if re.search(r'waku[1-8]', td_cls):
+                waku_td = td
+                break
 
-        # 枠番セルの判定: class="waku1"〜"waku8" が最も確実
-        # rowspanはフォールバックとして使用
-        _waku_classes = {f"waku{i}" for i in range(1, 9)}
-        is_waku_cell = bool(first_classes & _waku_classes)
-        if not is_waku_cell and first_td.get("rowspan"):
-            # クラスなしだがrowspanあり→内容が1-8なら枠番とみなす
-            is_waku_cell = bool(re.match(r'^[1-8]$', first))
-
-        if is_waku_cell:
-            # 枠番セル（その枠の最初の馬）
-            waku = first
+        if waku_td:
+            # 枠番セルが存在 → その枠の最初の馬
+            waku = waku_td.get_text(strip=True).translate(_z2h)
+            if not re.match(r'^[1-8]$', waku):
+                continue
             current_waku = waku
-            umaban_idx = 1
-        elif re.match(r'^\d+$', first) and current_waku:
-            # 枠番セルなし・数字 = 同枠2頭目以降（馬番が何番でも対応）
-            waku = current_waku
+            # umabanセルはwaku_tdの次
+            try:
+                umaban_idx = tds.index(waku_td) + 1
+            except ValueError:
+                continue
+        elif current_waku:
+            # 枠番セルなし → 同枠2頭目以降（先頭がumaban）
             umaban_idx = 0
         else:
             continue
@@ -1298,7 +1299,7 @@ def parse_deba_table(html):
         if len(tds) <= umaban_idx:
             continue
         umaban = tds[umaban_idx].get_text(strip=True).translate(_z2h)
-        if not re.match(r'^\d+$', umaban):
+        if not re.match(r'^\d+$', umaban) or not (1 <= int(umaban) <= 99):
             continue
 
         # 馬名: セルの最初のテキストノードだけ取る（<br>で馬齢・毛色が続くため get_text は使わない）
@@ -1306,6 +1307,10 @@ def parse_deba_table(html):
         if len(tds) > umaban_idx + 1:
             name_td = tds[umaban_idx + 1]
             name = next((s.strip() for s in name_td.strings if s.strip()), "")
+
+        # 馬名に日本語(カタカナ・漢字・ひらがな)が含まれなければ統計行とみなしスキップ
+        if not re.search(r'[぀-鿿ｦ-ﾟ]', name):
+            continue
 
         # オッズ列 (class=odds_weight)
         odds_td = tr.find("td", class_="odds_weight")
