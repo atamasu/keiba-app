@@ -1117,6 +1117,187 @@ def api_recent():
     return jsonify(result)
 
 
+# ── オッズ取得・レース予想 ────────────────────────────
+
+def fetch_race_entries(venue_name, race_no):
+    """keiba.go.jp の DebaTable から馬番・枠番・馬名・単勝・複勝オッズを取得"""
+    code = VENUE_CODES.get(venue_name)
+    if not code:
+        return []
+    today = date.today().isoformat()
+    date_fmt = today.replace("-", "%2F")
+    url = f"https://www.keiba.go.jp/KeibaWeb/TodayRaceInfo/DebaTable?k_raceDate={date_fmt}&k_raceNo={race_no}&k_babaCode={code}"
+    try:
+        html = fetch_html(url, timeout=10)
+    except Exception:
+        return []
+    return parse_deba_table(html)
+
+
+def parse_deba_table(html):
+    """
+    DebaTable HTML をパース。
+    各馬の先頭行（rowspan=2）から 枠番・馬番・馬名・オッズ を取得。
+    オッズ列 (class=odds_weight) に
+      単勝: "2.5" または "2.5\n(2人気)"
+      複勝: "1.1-1.8" のような形式で入る（発表前は空）。
+    """
+    soup = BeautifulSoup(html, "html.parser")
+    _z2h = str.maketrans('０１２３４５６７８９', '0123456789')
+
+    table = soup.find("table")
+    if not table:
+        return []
+
+    horses = []
+    rows = table.find_all("tr")
+
+    for tr in rows:
+        tds = tr.find_all("td")
+        if not tds:
+            continue
+
+        # 先頭セルが枠番（1〜8の数字）かチェック
+        first = tds[0].get_text(strip=True).translate(_z2h)
+        if not re.match(r'^[1-8]$', first):
+            continue
+        if len(tds) < 5:
+            continue
+
+        waku = first
+        umaban = tds[1].get_text(strip=True).translate(_z2h)
+        if not re.match(r'^\d+$', umaban):
+            continue
+
+        # 馬名：3列目のセル（テキスト先頭の日本語部分）
+        name_raw = tds[2].get_text(strip=True)
+        # 改行や余分な空白を除去し最初の塊だけ取る
+        name = re.split(r'[\s　]', name_raw)[0] if name_raw else ""
+
+        # オッズ列 (class=odds_weight)
+        odds_td = tr.find("td", class_="odds_weight")
+        tan_odds = None
+        fuku_odds = ""
+        if odds_td:
+            raw = odds_td.get_text(" ", strip=True).translate(_z2h)
+            # 単勝: 先頭の小数または整数
+            m_tan = re.search(r'(\d+\.\d+|\d{2,})', raw)
+            if m_tan:
+                try:
+                    tan_odds = float(m_tan.group(1))
+                except ValueError:
+                    pass
+            # 複勝: "1.1-1.8" 形式
+            m_fuku = re.search(r'(\d+\.\d+-\d+\.\d+)', raw)
+            if m_fuku:
+                fuku_odds = m_fuku.group(1)
+
+        horses.append({
+            "umaban": umaban,
+            "waku": waku,
+            "name": name,
+            "tan_odds": tan_odds,   # None = 未発表
+            "fuku_odds": fuku_odds, # "" = 未発表
+            "ninki": 0,
+        })
+
+    # 単勝オッズが出ていれば人気順を付与
+    has_odds = [h for h in horses if h["tan_odds"] is not None]
+    if has_odds:
+        for i, h in enumerate(sorted(has_odds, key=lambda x: x["tan_odds"]), 1):
+            h["ninki"] = i
+
+    return sorted(horses, key=lambda x: int(x["umaban"]) if x["umaban"].isdigit() else 99)
+
+
+def calc_prerace_score(horses, venue_name, days=90):
+    """
+    各馬にスコアを付ける。
+    オッズあり: 枠入着率×0.30 + 人気入着率×0.45 + 馬番入着率×0.25
+    オッズなし: 枠入着率×0.45 + 馬番入着率×0.55
+    """
+    cutoff = (date.today() - timedelta(days=days)).isoformat()
+
+    # _result.csv から枠別・馬番別入着率
+    result_rows = []
+    for f in sorted(glob.glob(f"{DATA_DIR}/**/{venue_name}_result.csv", recursive=True)):
+        parent = os.path.basename(os.path.dirname(f))
+        if parent < cutoff:
+            continue
+        try:
+            with open(f, encoding="utf-8") as fp:
+                result_rows.extend(list(csv.DictReader(fp)))
+        except Exception:
+            pass
+
+    total_races = len(result_rows)
+    waku_in = defaultdict(int)
+    umaban_in = defaultdict(int)
+    for row in result_rows:
+        for i in range(1, 4):
+            w = row.get(f"枠{i}", "")
+            ub = row.get(f"馬番{i}", "")
+            if w: waku_in[w] += 1
+            if ub: umaban_in[ub] += 1
+
+    waku_rate = {w: cnt / total_races * 100 for w, cnt in waku_in.items()} if total_races else {}
+    umaban_rate = {ub: cnt / total_races * 100 for ub, cnt in umaban_in.items()} if total_races else {}
+
+    # _fukusho.csv から人気別入着率
+    fuku_rows = [r for r in load_fukusho_data(venue=venue_name)
+                 if r.get('日付', '') >= cutoff]
+    ninki_in = defaultdict(int)
+    fuku_races = len(set((r.get('日付',''), r.get('競馬場',''), r.get('R','')) for r in fuku_rows))
+    for row in fuku_rows:
+        nk = str(row.get('人気', ''))
+        if nk: ninki_in[nk] += 1
+    ninki_rate = {nk: cnt / fuku_races * 100 for nk, cnt in ninki_in.items()} if fuku_races else {}
+
+    has_odds = any(h["tan_odds"] is not None for h in horses)
+
+    for h in horses:
+        wr = waku_rate.get(h["waku"], 0)
+        ur = umaban_rate.get(h["umaban"], 0)
+        nr = ninki_rate.get(str(h["ninki"]), 0) if h["ninki"] else 0
+
+        if has_odds and h["ninki"]:
+            score = wr * 0.30 + nr * 0.45 + ur * 0.25
+        else:
+            score = wr * 0.45 + ur * 0.55
+
+        h["score"] = round(score, 1)
+        h["waku_rate"] = round(wr, 1)
+        h["ninki_rate"] = round(nr, 1)
+        h["umaban_rate"] = round(ur, 1)
+
+    return sorted(horses, key=lambda x: -x["score"])
+
+
+@app.route("/api/race_predict")
+def api_race_predict():
+    """出走表取得（オッズあれば付与）＋過去データでおすすめ馬を返す"""
+    venue = request.args.get("venue", "")
+    race_no = request.args.get("race", type=int, default=1)
+    days = request.args.get("days", type=int, default=90)
+
+    if not venue or venue not in VENUE_CODES:
+        return jsonify({"error": "競馬場名が不正です"}), 400
+
+    horses = fetch_race_entries(venue, race_no)
+    if not horses:
+        return jsonify({"error": "出走表を取得できませんでした（開催日・レース番号を確認してください）", "horses": []}), 200
+
+    has_odds = any(h["tan_odds"] is not None for h in horses)
+    scored = calc_prerace_score(horses, venue, days=days)
+    return jsonify({
+        "venue": venue,
+        "race": race_no,
+        "horses": scored,
+        "has_odds": has_odds,
+        "data_days": days,
+    })
+
+
 def start_scheduler():
     from apscheduler.schedulers.background import BackgroundScheduler
     from apscheduler.triggers.cron import CronTrigger

@@ -362,6 +362,7 @@
 <div class="container">
   <div class="tab-bar">
     <div class="tab active" onclick="showTab('collect')">📥 収集</div>
+    <div class="tab" onclick="showTab('predict')">🔮 予想</div>
     <div class="tab" onclick="showTab('summary')">🏆 おすすめ</div>
     <div class="tab" onclick="showTab('sanrenpuku')">🎯 三連複</div>
     <div class="tab" onclick="showTab('analysis')">📊 詳細</div>
@@ -387,6 +388,34 @@
     <div class="card">
       <h2>収集済み直近10日</h2>
       <div id="recent-list"><div class="loading-center">読み込み中...</div></div>
+    </div>
+  </div>
+
+  <!-- レース予想タブ -->
+  <div id="tab-predict" style="display:none">
+    <div class="card">
+      <h2>🔮 レース予想</h2>
+      <p style="color:#6b7280;font-size:13px;margin-bottom:12px">
+        リアルタイムのオッズ＋過去の枠別・馬番別・人気別入着率を組み合わせておすすめ馬を提示します。
+      </p>
+      <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:12px">
+        <select id="predict-venue" style="padding:8px 12px;border-radius:8px;border:1px solid #d1d5db;font-size:14px">
+          <option value="">競馬場を選択</option>
+        </select>
+        <div style="display:flex;align-items:center;gap:6px">
+          <span style="font-size:14px;color:#374151">R</span>
+          <input type="number" id="predict-race" min="1" max="20" value="1"
+            style="width:64px;padding:8px;border-radius:8px;border:1px solid #d1d5db;font-size:14px;text-align:center">
+        </div>
+        <select id="predict-days" style="padding:8px 12px;border-radius:8px;border:1px solid #d1d5db;font-size:14px">
+          <option value="30">過去1ヶ月</option>
+          <option value="60">過去2ヶ月</option>
+          <option value="90" selected>過去3ヶ月</option>
+          <option value="180">過去半年</option>
+        </select>
+        <button class="btn btn-primary" onclick="loadPredict()">予想を見る</button>
+      </div>
+      <div id="predict-result"></div>
     </div>
   </div>
 
@@ -518,12 +547,13 @@ let currentSummaryVenue = null;
 let currentTrendVenue = null;
 
 function showTab(name) {
-  ['collect','summary','sanrenpuku','analysis','races','history'].forEach(t => {
+  ['collect','predict','summary','sanrenpuku','analysis','races','history'].forEach(t => {
     document.getElementById('tab-'+t).style.display = t===name ? '' : 'none';
   });
   document.querySelectorAll('.tab').forEach((el,i) => {
-    el.classList.toggle('active', ['collect','summary','sanrenpuku','analysis','races','history'][i] === name);
+    el.classList.toggle('active', ['collect','predict','summary','sanrenpuku','analysis','races','history'][i] === name);
   });
+  if (name === 'predict') initPredictVenues();
   if (name === 'summary') {
     if (document.querySelectorAll('#summary-venue-grid .venue-btn').length <= 1) loadSummaryVenues();
     else loadSummary();
@@ -541,6 +571,128 @@ function showTab(name) {
 }
 
 const API = (location.origin && location.origin !== 'null') ? location.origin : '';
+
+// ── レース予想 ────────────────────────────────
+const WAKU_BG_P  = ['','#f3f4f6','#1f2937','#fee2e2','#dbeafe','#fef9c3','#dcfce7','#ffedd5','#fce7f3'];
+const WAKU_COL_P = ['','#111','#fff','#fff','#fff','#000','#fff','#fff','#fff'];
+const WAKU_NAME_P = ['','白','黒','赤','青','黄','緑','橙','桃'];
+
+function initPredictVenues() {
+  const sel = document.getElementById('predict-venue');
+  if (sel.options.length > 1) return;
+  const venues = ['帯広','門別','盛岡','水沢','浦和','船橋','大井','川崎','金沢','笠松','名古屋','園田','高知','佐賀'];
+  venues.forEach(v => {
+    const opt = document.createElement('option');
+    opt.value = v; opt.textContent = v;
+    sel.appendChild(opt);
+  });
+}
+
+async function loadPredict() {
+  const venue = document.getElementById('predict-venue').value;
+  const race  = document.getElementById('predict-race').value;
+  const days  = document.getElementById('predict-days').value;
+  const area  = document.getElementById('predict-result');
+  if (!venue) { area.innerHTML = '<p style="color:#ef4444">競馬場を選択してください</p>'; return; }
+  area.innerHTML = '<div class="loading-center">出走表取得中...</div>';
+  try {
+    const res = await fetch(`${API}/api/race_predict?venue=${encodeURIComponent(venue)}&race=${race}&days=${days}`);
+    const d = await res.json();
+    if (!d.horses || d.horses.length === 0) {
+      area.innerHTML = `<p style="color:#ef4444">${d.error || '出走表を取得できませんでした'}</p>`; return;
+    }
+
+    const horses = d.horses;  // すでにスコア順
+    const maxScore = horses[0]?.score || 1;
+    const hasOdds = d.has_odds;
+    const scoreFormula = hasOdds
+      ? 'スコア＝枠入着率×0.30＋人気入着率×0.45＋馬番入着率×0.25'
+      : 'スコア＝枠入着率×0.45＋馬番入着率×0.55（オッズ未発表のため人気を除外）';
+
+    let html = `<div style="margin-bottom:16px">
+      <div style="font-size:13px;color:#6b7280;margin-bottom:8px">
+        過去${days}日の${venue}データから算出 ／ ${scoreFormula}
+      </div>`;
+
+    // オッズ未発表バナー
+    if (!hasOdds) {
+      html += `<div style="background:#fef9c3;border:1px solid #fbbf24;border-radius:8px;padding:10px 14px;font-size:13px;color:#92400e;margin-bottom:12px">
+        ⚠️ オッズはまだ発表されていません。発走約1時間前に更新すると単勝・複勝が表示されます。
+      </div>`;
+    }
+
+    // おすすめ上位3頭
+    html += `<div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:16px">`;
+    horses.slice(0,3).forEach((h,i) => {
+      const wi = parseInt(h.waku) || 0;
+      const bg = WAKU_BG_P[wi] || '#f3f4f6';
+      const col = WAKU_COL_P[wi] || '#111';
+      const medal = ['🥇','🥈','🥉'][i];
+      const oddsLine = hasOdds
+        ? `単勝 ${h.tan_odds ?? '-'} (${h.ninki}人気)<br>複勝 ${h.fuku_odds || '-'}`
+        : `枠${h.waku}(${WAKU_NAME_P[wi]})`;
+      html += `<div style="flex:1;min-width:160px;padding:14px;border-radius:12px;background:${bg};color:${col};box-shadow:0 2px 8px rgba(0,0,0,.1)">
+        <div style="font-size:20px;margin-bottom:4px">${medal}</div>
+        <div style="font-size:22px;font-weight:700">${h.umaban}番</div>
+        <div style="font-size:13px;margin-bottom:6px;opacity:.85">${h.name || ''}</div>
+        <div style="font-size:12px;line-height:1.7">${oddsLine}</div>
+        <div style="font-size:12px;margin-top:6px">スコア: <strong>${h.score}</strong></div>
+      </div>`;
+    });
+    html += '</div>';
+
+    // 全馬テーブル
+    const oddsHeader = hasOdds
+      ? '<th style="padding:8px;text-align:center">単勝</th><th style="padding:8px;text-align:center">複勝</th><th style="padding:8px;text-align:center">人気</th>'
+      : '';
+    html += `<div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;font-size:13px">
+      <thead><tr style="background:#f3f4f6">
+        <th style="padding:8px;text-align:center">馬番</th>
+        <th style="padding:8px;text-align:center">枠</th>
+        <th style="padding:8px;text-align:left">馬名</th>
+        ${oddsHeader}
+        <th style="padding:8px;text-align:center">枠入着率</th>
+        <th style="padding:8px;text-align:center">人気入着率</th>
+        <th style="padding:8px;text-align:center">馬番入着率</th>
+        <th style="padding:8px;text-align:center">スコア</th>
+      </tr></thead><tbody>`;
+
+    horses.forEach(h => {
+      const wi = parseInt(h.waku) || 0;
+      const bg = WAKU_BG_P[wi] || '#f3f4f6';
+      const col = WAKU_COL_P[wi] || '#111';
+      const barW = maxScore > 0 ? Math.round(h.score / maxScore * 100) : 0;
+      const oddsCells = hasOdds
+        ? `<td style="padding:8px;text-align:center;font-weight:700">${h.tan_odds ?? '-'}</td>
+           <td style="padding:8px;text-align:center;font-size:12px">${h.fuku_odds || '-'}</td>
+           <td style="padding:8px;text-align:center">${h.ninki || '-'}</td>`
+        : '';
+      html += `<tr style="border-bottom:1px solid #f3f4f6">
+        <td style="padding:8px;text-align:center;font-weight:700">${h.umaban}</td>
+        <td style="padding:8px;text-align:center">
+          <span style="display:inline-block;width:26px;height:26px;border-radius:50%;background:${bg};color:${col};line-height:26px;font-size:12px;font-weight:700">${h.waku}</span>
+        </td>
+        <td style="padding:8px">${h.name || '-'}</td>
+        ${oddsCells}
+        <td style="padding:8px;text-align:center">${h.waku_rate}%</td>
+        <td style="padding:8px;text-align:center">${h.ninki_rate}%</td>
+        <td style="padding:8px;text-align:center">${h.umaban_rate}%</td>
+        <td style="padding:8px;text-align:center">
+          <div style="display:flex;align-items:center;gap:6px">
+            <div style="flex:1;height:8px;background:#e5e7eb;border-radius:4px">
+              <div style="width:${barW}%;height:8px;background:#6366f1;border-radius:4px"></div>
+            </div>
+            <span style="font-weight:700;min-width:32px">${h.score}</span>
+          </div>
+        </td>
+      </tr>`;
+    });
+    html += '</tbody></table></div></div>';
+    area.innerHTML = html;
+  } catch(e) {
+    area.innerHTML = `<p style="color:#ef4444">エラー: ${e.message}</p>`;
+  }
+}
 
 // ── データ収集 ────────────────────────────────
 async function startMissingCollect() {
