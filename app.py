@@ -1239,11 +1239,12 @@ def parse_deba_table(html):
     return sorted(horses, key=lambda x: int(x["umaban"]) if x["umaban"].isdigit() else 99)
 
 
-def calc_prerace_score(horses, venue_name, days=90):
+def calc_prerace_score(horses, venue_name, days=90, min_odds=None):
     """
     各馬にスコアを付ける。
     オッズあり: 枠入着率×0.30 + 人気入着率×0.45 + 馬番入着率×0.25
     オッズなし: 枠入着率×0.45 + 馬番入着率×0.55
+    min_odds: この値未満の単勝オッズの馬は eligible=False とする
     """
     cutoff = (date.today() - timedelta(days=days)).isoformat()
 
@@ -1298,7 +1299,21 @@ def calc_prerace_score(horses, venue_name, days=90):
         h["ninki_rate"] = round(nr, 1)
         h["umaban_rate"] = round(ur, 1)
 
-    return sorted(horses, key=lambda x: -x["score"])
+        # 最低オッズフィルター: tan_oddsがあり閾値未満ならeligible=False
+        if min_odds and h["tan_odds"] is not None:
+            h["eligible"] = h["tan_odds"] >= min_odds
+        else:
+            h["eligible"] = True
+
+    # スコアランキングはeligible馬の中だけで付ける
+    eligible = [h for h in horses if h["eligible"]]
+    for rank, h in enumerate(sorted(eligible, key=lambda x: -x["score"]), 1):
+        h["score_rank"] = rank
+    for h in horses:
+        if not h["eligible"]:
+            h["score_rank"] = None
+
+    return sorted(horses, key=lambda x: x.get("umaban_int", int(x["umaban"]) if x["umaban"].isdigit() else 99))
 
 
 @app.route("/api/race_predict")
@@ -1307,6 +1322,7 @@ def api_race_predict():
     venue = request.args.get("venue", "")
     race_no = request.args.get("race", type=int, default=1)
     days = request.args.get("days", type=int, default=90)
+    min_odds = request.args.get("min_odds", type=float, default=None)
 
     if not venue or venue not in VENUE_CODES:
         return jsonify({"error": "競馬場名が不正です"}), 400
@@ -1316,7 +1332,7 @@ def api_race_predict():
         return jsonify({"error": "出走表を取得できませんでした（開催日・レース番号を確認してください）", "horses": []}), 200
 
     has_odds = any(h["tan_odds"] is not None for h in horses)
-    scored = calc_prerace_score(horses, venue, days=days)
+    scored = calc_prerace_score(horses, venue, days=days, min_odds=min_odds)
     today_trend = _calc_today_trend(venue)
     return jsonify({
         "venue": venue,
