@@ -1273,14 +1273,23 @@ def parse_deba_table(html):
 
         first_td = tds[0]
         first = first_td.get_text(strip=True).translate(_z2h)
+        first_classes = set(first_td.get("class") or [])
 
-        if first_td.get("rowspan") and re.match(r'^[1-8]$', first):
-            # rowspan あり = 枠番セル（その枠の最初の馬）
+        # 枠番セルの判定: class="waku1"〜"waku8" が最も確実
+        # rowspanはフォールバックとして使用
+        _waku_classes = {f"waku{i}" for i in range(1, 9)}
+        is_waku_cell = bool(first_classes & _waku_classes)
+        if not is_waku_cell and first_td.get("rowspan"):
+            # クラスなしだがrowspanあり→内容が1-8なら枠番とみなす
+            is_waku_cell = bool(re.match(r'^[1-8]$', first))
+
+        if is_waku_cell:
+            # 枠番セル（その枠の最初の馬）
             waku = first
             current_waku = waku
             umaban_idx = 1
-        elif not first_td.get("rowspan") and re.match(r'^\d+$', first) and current_waku:
-            # rowspan なし・数字 = 枠番が省略された同枠2頭目以降（馬番8も含む）
+        elif re.match(r'^\d+$', first) and current_waku:
+            # 枠番セルなし・数字 = 同枠2頭目以降（馬番が何番でも対応）
             waku = current_waku
             umaban_idx = 0
         else:
