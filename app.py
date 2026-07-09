@@ -1019,8 +1019,9 @@ def _calc_today_trend(venue_name):
             "waku": {k: {"count": c, "rate": round(c / total * 100)} for k, c in wk_count.items()},
             "umaban": {k: {"count": c, "rate": round(c / total * 100)} for k, c in um_count.items()},
             "ninki": {k: {"count": c, "rate": round(c / total * 100)} for k, c in nk_count.items()},
-            "hot_waku": sorted(wk_count.keys(), key=lambda x: -wk_count[x])[:3],
+            "hot_waku":   sorted(wk_count.keys(), key=lambda x: -wk_count[x])[:3],
             "hot_umaban": sorted(um_count.keys(), key=lambda x: -um_count[x])[:3],
+            "hot_ninki":  sorted(nk_count.keys(), key=lambda x: -nk_count[x])[:3],
         }
     except Exception:
         return None
@@ -1176,15 +1177,16 @@ def parse_deba_table(html):
         if not tds:
             continue
 
-        first = tds[0].get_text(strip=True).translate(_z2h)
+        first_td = tds[0]
+        first = first_td.get_text(strip=True).translate(_z2h)
 
-        if re.match(r'^[1-8]$', first):
-            # 通常行: 先頭セルが枠番
+        if first_td.get("rowspan") and re.match(r'^[1-8]$', first):
+            # rowspan あり = 枠番セル（その枠の最初の馬）
             waku = first
             current_waku = waku
             umaban_idx = 1
-        elif re.match(r'^\d+$', first) and int(first) > 8 and current_waku:
-            # 同枠2頭目以降: 枠番セルが rowspan で省略されている
+        elif not first_td.get("rowspan") and re.match(r'^\d+$', first) and current_waku:
+            # rowspan なし・数字 = 枠番が省略された同枠2頭目以降（馬番8も含む）
             waku = current_waku
             umaban_idx = 0
         else:
