@@ -1451,7 +1451,26 @@ def api_race_predict():
 
     horses = fetch_race_entries(venue, race_no)
     if not horses:
-        return jsonify({"error": "出走表を取得できませんでした（開催日・レース番号を確認してください）", "horses": []}), 200
+        # デバッグ: 生HTMLを少量返してパース状況を確認
+        code = VENUE_CODES.get(venue, "")
+        today = date.today().isoformat()
+        date_fmt = today.replace("-", "%2F")
+        debug_url = f"https://www.keiba.go.jp/KeibaWeb/TodayRaceInfo/DebaTable?k_raceDate={date_fmt}&k_raceNo={race_no}&k_babaCode={code}"
+        debug_info = ""
+        try:
+            raw_html = fetch_html(debug_url, timeout=10)
+            soup_d = BeautifulSoup(raw_html, "html.parser")
+            tbl = soup_d.find("table")
+            if tbl:
+                trs = tbl.find_all("tr")
+                debug_info = f"table行数={len(trs)} / 先頭3行テキスト: " + " | ".join(
+                    str([td.get_text(strip=True)[:10] for td in tr.find_all("td")[:4]]) for tr in trs[:3]
+                )
+            else:
+                debug_info = "tableタグなし / body抜粋: " + raw_html[200:400]
+        except Exception as e:
+            debug_info = f"fetch失敗: {e}"
+        return jsonify({"error": f"出走表を取得できませんでした。debug={debug_info}", "horses": []}), 200
 
     has_odds    = any(h["tan_odds"] is not None for h in horses)
     today_trend = _calc_today_trend(venue)
