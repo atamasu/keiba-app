@@ -1137,10 +1137,11 @@ def fetch_race_entries(venue_name, race_no):
 def parse_deba_table(html):
     """
     DebaTable HTML をパース。
-    各馬の先頭行（rowspan=2）から 枠番・馬番・馬名・オッズ を取得。
-    オッズ列 (class=odds_weight) に
-      単勝: "2.5" または "2.5\n(2人気)"
-      複勝: "1.1-1.8" のような形式で入る（発表前は空）。
+    各馬の先頭行から 枠番・馬番・馬名・オッズ を取得。
+
+    注意: 同じ枠に複数馬がいる場合（例: 9頭立てで枠8に馬番8・9）、
+    2頭目以降は枠番セルが rowspan で省略される。
+    その場合は先頭セルが umaban になるので current_waku を引き継ぐ。
     """
     soup = BeautifulSoup(html, "html.parser")
     _z2h = str.maketrans('０１２３４５６７８９', '0123456789')
@@ -1150,6 +1151,7 @@ def parse_deba_table(html):
         return []
 
     horses = []
+    current_waku = ""
     rows = table.find_all("tr")
 
     for tr in rows:
@@ -1157,21 +1159,28 @@ def parse_deba_table(html):
         if not tds:
             continue
 
-        # 先頭セルが枠番（1〜8の数字）かチェック
         first = tds[0].get_text(strip=True).translate(_z2h)
-        if not re.match(r'^[1-8]$', first):
-            continue
-        if len(tds) < 5:
+
+        if re.match(r'^[1-8]$', first):
+            # 通常行: 先頭セルが枠番
+            waku = first
+            current_waku = waku
+            umaban_idx = 1
+        elif re.match(r'^\d+$', first) and int(first) > 8 and current_waku:
+            # 同枠2頭目以降: 枠番セルが rowspan で省略されている
+            waku = current_waku
+            umaban_idx = 0
+        else:
             continue
 
-        waku = first
-        umaban = tds[1].get_text(strip=True).translate(_z2h)
+        if len(tds) <= umaban_idx:
+            continue
+        umaban = tds[umaban_idx].get_text(strip=True).translate(_z2h)
         if not re.match(r'^\d+$', umaban):
             continue
 
-        # 馬名：3列目のセル（テキスト先頭の日本語部分）
-        name_raw = tds[2].get_text(strip=True)
-        # 改行や余分な空白を除去し最初の塊だけ取る
+        # 馬名
+        name_raw = tds[umaban_idx + 1].get_text(strip=True) if len(tds) > umaban_idx + 1 else ""
         name = re.split(r'[\s　]', name_raw)[0] if name_raw else ""
 
         # オッズ列 (class=odds_weight)
@@ -1180,14 +1189,12 @@ def parse_deba_table(html):
         fuku_odds = ""
         if odds_td:
             raw = odds_td.get_text(" ", strip=True).translate(_z2h)
-            # 単勝: 先頭の小数または整数
             m_tan = re.search(r'(\d+\.\d+|\d{2,})', raw)
             if m_tan:
                 try:
                     tan_odds = float(m_tan.group(1))
                 except ValueError:
                     pass
-            # 複勝: "1.1-1.8" 形式
             m_fuku = re.search(r'(\d+\.\d+-\d+\.\d+)', raw)
             if m_fuku:
                 fuku_odds = m_fuku.group(1)
@@ -1196,8 +1203,8 @@ def parse_deba_table(html):
             "umaban": umaban,
             "waku": waku,
             "name": name,
-            "tan_odds": tan_odds,   # None = 未発表
-            "fuku_odds": fuku_odds, # "" = 未発表
+            "tan_odds": tan_odds,
+            "fuku_odds": fuku_odds,
             "ninki": 0,
         })
 
