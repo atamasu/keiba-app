@@ -1195,9 +1195,10 @@ def parse_deba_table(html):
                     tan_odds = float(m_tan.group(1))
                 except ValueError:
                     pass
-            m_fuku = re.search(r'(\d+\.\d+-\d+\.\d+)', raw)
+            # 複勝: "1.1-1.8" または "1.1 - 1.8"（スペースあり）形式
+            m_fuku = re.search(r'(\d+\.?\d*)\s*-\s*(\d+\.?\d*)', raw)
             if m_fuku:
-                fuku_odds = m_fuku.group(1)
+                fuku_odds = f"{m_fuku.group(1)}-{m_fuku.group(2)}"
 
         horses.append({
             "umaban": umaban,
@@ -1250,9 +1251,8 @@ def calc_prerace_score(horses, venue_name, days=90):
     waku_rate = {w: cnt / total_races * 100 for w, cnt in waku_in.items()} if total_races else {}
     umaban_rate = {ub: cnt / total_races * 100 for ub, cnt in umaban_in.items()} if total_races else {}
 
-    # _fukusho.csv から人気別入着率
-    fuku_rows = [r for r in load_fukusho_data(venue=venue_name)
-                 if r.get('日付', '') >= cutoff]
+    # _fukusho.csv から人気別入着率（days分だけ読む）
+    fuku_rows = load_fukusho_data(venue=venue_name, days=days)
     ninki_in = defaultdict(int)
     fuku_races = len(set((r.get('日付',''), r.get('競馬場',''), r.get('R','')) for r in fuku_rows))
     for row in fuku_rows:
