@@ -991,6 +991,100 @@ def api_venue_analysis():
     return jsonify(out)
 
 
+def _calc_venue_patterns(venue_name, days=90):
+    """
+    過去データから「穴馬(4番人気以降)が来やすい枠・馬番」と
+    「人気×枠の特に強い組み合わせ」を集計して返す。
+    """
+    cutoff = (date.today() - timedelta(days=days)).isoformat()
+    rows = []
+    for f in sorted(glob.glob(f"{DATA_DIR}/**/{venue_name}_result.csv", recursive=True)):
+        parent = os.path.basename(os.path.dirname(f))
+        if parent < cutoff:
+            continue
+        try:
+            with open(f, encoding="utf-8") as fp:
+                rows.extend(list(csv.DictReader(fp)))
+        except Exception:
+            pass
+
+    if not rows:
+        return None
+
+    total = len(rows)
+
+    # 枠・馬番・人気別の入着カウント（全体）
+    waku_cnt   = defaultdict(int)
+    umaban_cnt = defaultdict(int)
+    ninki_cnt  = defaultdict(int)
+
+    # 穴馬(4番人気以降)の入着カウント
+    ana_waku_cnt   = defaultdict(int)
+    ana_umaban_cnt = defaultdict(int)
+    ana_total = 0
+
+    # 人気×枠の組み合わせカウント
+    ninki_waku_cnt = defaultdict(int)
+    ninki_waku_total = defaultdict(int)  # その人気帯の出走総数（近似）
+
+    for row in rows:
+        for i in range(1, 4):
+            wk  = row.get(f"枠{i}", "").strip()
+            ub  = row.get(f"馬番{i}", "").strip()
+            nk  = row.get(f"人気{i}", "").strip()
+            if wk:  waku_cnt[wk]   += 1
+            if ub:  umaban_cnt[ub] += 1
+            if nk:  ninki_cnt[nk]  += 1
+
+            # 穴馬判定（人気が4以上）
+            try:
+                nk_int = int(nk)
+            except (ValueError, TypeError):
+                nk_int = 0
+            if nk_int >= 4:
+                ana_total += 1
+                if wk: ana_waku_cnt[wk]   += 1
+                if ub: ana_umaban_cnt[ub] += 1
+
+            # 人気×枠の組み合わせ
+            if nk and wk:
+                ninki_waku_cnt[(nk, wk)] += 1
+
+    # 各人気帯の総入着数
+    for (nk, wk), cnt in ninki_waku_cnt.items():
+        ninki_waku_total[nk] += cnt
+
+    # 人気×枠の入着率（分子:その組み合わせの入着数 / 分母:その人気帯の入着数）
+    combo_rates = []
+    for (nk, wk), cnt in ninki_waku_cnt.items():
+        denom = ninki_waku_total.get(nk, 0)
+        if denom < 5:
+            continue
+        rate = round(cnt / denom * 100)
+        combo_rates.append({"ninki": nk, "waku": wk, "count": cnt, "rate": rate})
+
+    # 特に強い組み合わせ（入着率上位5、ただし4番人気以降に絞る）
+    ana_combos = sorted(
+        [c for c in combo_rates if int(c["ninki"]) >= 4],
+        key=lambda x: -x["rate"]
+    )[:5]
+
+    # 穴馬の枠・馬番ランキング
+    if ana_total > 0:
+        ana_waku_rank   = sorted(ana_waku_cnt.items(),   key=lambda x: -x[1])[:4]
+        ana_umaban_rank = sorted(ana_umaban_cnt.items(), key=lambda x: -x[1])[:5]
+    else:
+        ana_waku_rank   = []
+        ana_umaban_rank = []
+
+    return {
+        "total_races": total,
+        "ana_waku":   [{"waku": w, "count": c, "rate": round(c / ana_total * 100)} for w, c in ana_waku_rank] if ana_total else [],
+        "ana_umaban": [{"umaban": u, "count": c, "rate": round(c / ana_total * 100)} for u, c in ana_umaban_rank] if ana_total else [],
+        "hot_combos": ana_combos,
+    }
+
+
 def _calc_today_trend(venue_name):
     """今日の完了レースから枠・馬番・人気の入着傾向を集計して返す"""
     today = date.today().isoformat()
@@ -1334,6 +1428,7 @@ def api_race_predict():
     has_odds = any(h["tan_odds"] is not None for h in horses)
     scored = calc_prerace_score(horses, venue, days=days, min_odds=min_odds)
     today_trend = _calc_today_trend(venue)
+    patterns = _calc_venue_patterns(venue, days=days)
     return jsonify({
         "venue": venue,
         "race": race_no,
@@ -1341,7 +1436,117 @@ def api_race_predict():
         "has_odds": has_odds,
         "data_days": days,
         "today_trend": today_trend,
+        "patterns": patterns,
     })
+
+
+PREDICT_LOG_FILE = os.path.join(DATA_DIR, "predict_log.csv")
+PREDICT_LOG_FIELDS = ["date", "venue", "race", "rank1", "rank2", "rank3", "logged_at"]
+_predict_log_lock = threading.Lock()
+
+
+def _append_predict_log(date_str, venue, race, rank1, rank2, rank3):
+    """予想ログ（スコア上位3頭のumaban）をCSVに追記する。同日同レースは上書き。"""
+    rows = []
+    if os.path.exists(PREDICT_LOG_FILE):
+        try:
+            with open(PREDICT_LOG_FILE, encoding="utf-8") as f:
+                rows = list(csv.DictReader(f))
+        except Exception:
+            rows = []
+    # 同日・同場・同Rは最新で置き換え
+    rows = [r for r in rows if not (r["date"] == date_str and r["venue"] == venue and r["race"] == str(race))]
+    import datetime as _dt
+    rows.append({
+        "date": date_str, "venue": venue, "race": str(race),
+        "rank1": rank1, "rank2": rank2, "rank3": rank3,
+        "logged_at": _dt.datetime.now().strftime("%H:%M"),
+    })
+    with open(PREDICT_LOG_FILE, "w", encoding="utf-8", newline="") as f:
+        w = csv.DictWriter(f, fieldnames=PREDICT_LOG_FIELDS)
+        w.writeheader()
+        w.writerows(rows)
+
+
+@app.route("/api/log_prediction", methods=["POST"])
+def api_log_prediction():
+    """JSから予想ペア生成時に呼ばれ、スコア上位3頭のumabanを記録する。"""
+    data = request.get_json(force=True) or {}
+    venue    = data.get("venue", "")
+    race     = data.get("race", 0)
+    top3     = data.get("top3", [])   # umaban文字列リスト（スコア順1〜3位）
+    if not venue or not race or not top3:
+        return jsonify({"ok": False}), 400
+    r1 = top3[0] if len(top3) > 0 else ""
+    r2 = top3[1] if len(top3) > 1 else ""
+    r3 = top3[2] if len(top3) > 2 else ""
+    with _predict_log_lock:
+        try:
+            _append_predict_log(date.today().isoformat(), venue, race, r1, r2, r3)
+        except Exception as e:
+            return jsonify({"ok": False, "error": str(e)}), 500
+    return jsonify({"ok": True})
+
+
+@app.route("/api/predict_results")
+def api_predict_results():
+    """
+    予想ログと実際の結果を照合して的中率を返す。
+    ワイド的中 = ログのrank1〜3のうち2頭以上が結果の馬番1〜3に含まれる。
+    """
+    days = request.args.get("days", type=int, default=30)
+    cutoff = (date.today() - timedelta(days=days)).isoformat()
+
+    if not os.path.exists(PREDICT_LOG_FILE):
+        return jsonify({"records": [], "hit_rate": None, "total": 0, "hit": 0})
+
+    try:
+        with open(PREDICT_LOG_FILE, encoding="utf-8") as f:
+            logs = [r for r in csv.DictReader(f) if r.get("date", "") >= cutoff]
+    except Exception:
+        return jsonify({"records": [], "hit_rate": None, "total": 0, "hit": 0})
+
+    records = []
+    total = hit = 0
+    for log in sorted(logs, key=lambda x: (x["date"], x["venue"], int(x["race"] or 0)), reverse=True):
+        d_str   = log["date"]
+        venue   = log["venue"]
+        race    = log["race"]
+        pred    = {log["rank1"], log["rank2"], log["rank3"]} - {""}
+
+        # 結果CSVから当該レースを探す
+        result_path = os.path.join(DATA_DIR, d_str, f"{venue}_result.csv")
+        result_row  = None
+        if os.path.exists(result_path):
+            try:
+                with open(result_path, encoding="utf-8") as f:
+                    for row in csv.DictReader(f):
+                        if row.get("R", "") == race:
+                            result_row = row
+                            break
+            except Exception:
+                pass
+
+        if result_row:
+            actual = {result_row.get("馬番1",""), result_row.get("馬番2",""), result_row.get("馬番3","")} - {""}
+            matched = pred & actual
+            is_hit  = len(matched) >= 2
+            total  += 1
+            if is_hit: hit += 1
+            records.append({
+                "date": d_str, "venue": venue, "race": race,
+                "pred": sorted(pred), "actual": sorted(actual),
+                "matched": sorted(matched), "hit": is_hit,
+                "ninki1": result_row.get("人気1",""), "ninki2": result_row.get("人気2",""), "ninki3": result_row.get("人気3",""),
+            })
+        else:
+            records.append({
+                "date": d_str, "venue": venue, "race": race,
+                "pred": sorted(pred), "actual": None, "matched": [], "hit": None,
+            })
+
+    hit_rate = round(hit / total * 100) if total > 0 else None
+    return jsonify({"records": records, "hit_rate": hit_rate, "total": total, "hit": hit})
 
 
 def start_scheduler():
