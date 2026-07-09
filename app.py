@@ -991,41 +991,58 @@ def api_venue_analysis():
     return jsonify(out)
 
 
+def _calc_today_trend(venue_name):
+    """今日の完了レースから枠・馬番・人気の入着傾向を集計して返す"""
+    today = date.today().isoformat()
+    result_path = os.path.join(DATA_DIR, today, f"{venue_name}_result.csv")
+    if not os.path.exists(result_path):
+        return None
+    try:
+        with open(result_path, encoding="utf-8") as f:
+            rows = list(csv.DictReader(f))
+        if not rows:
+            return None
+        um_count = defaultdict(int)
+        nk_count = defaultdict(int)
+        wk_count = defaultdict(int)
+        total = len(rows)
+        for row in rows:
+            for i in range(1, 4):
+                ub = row.get(f"馬番{i}", "")
+                nk = row.get(f"人気{i}", "")
+                wkv = row.get(f"枠{i}", "")
+                if ub: um_count[ub] += 1
+                if nk: nk_count[nk] += 1
+                if wkv: wk_count[wkv] += 1
+        return {
+            "completed_races": total,
+            "waku": {k: {"count": c, "rate": round(c / total * 100)} for k, c in wk_count.items()},
+            "umaban": {k: {"count": c, "rate": round(c / total * 100)} for k, c in um_count.items()},
+            "ninki": {k: {"count": c, "rate": round(c / total * 100)} for k, c in nk_count.items()},
+            "hot_waku": sorted(wk_count.keys(), key=lambda x: -wk_count[x])[:3],
+            "hot_umaban": sorted(um_count.keys(), key=lambda x: -um_count[x])[:3],
+        }
+    except Exception:
+        return None
+
+
 @app.route("/api/today_live")
 def api_today_live():
     """今日の進行状況をリアルタイムで返す"""
     today = date.today().isoformat()
     venues_data = []
     for venue_name in sorted(VENUE_CODES.keys()):
-        result_path = os.path.join(DATA_DIR, today, f"{venue_name}_result.csv")
-        if not os.path.exists(result_path):
+        trend = _calc_today_trend(venue_name)
+        if not trend:
             continue
-        try:
-            with open(result_path, encoding="utf-8") as f:
-                rows = list(csv.DictReader(f))
-            if not rows:
-                continue
-            um_count = defaultdict(int)
-            nk_count = defaultdict(int)
-            wk_count = defaultdict(int)
-            total = len(rows)
-            for row in rows:
-                for i in range(1, 4):
-                    ub = row.get(f"馬番{i}", "")
-                    nk = row.get(f"人気{i}", "")
-                    wkv = row.get(f"枠{i}", "")
-                    if ub: um_count[ub] += 1
-                    if nk: nk_count[nk] += 1
-                    if wkv: wk_count[wkv] += 1
-            venues_data.append({
-                "venue": venue_name,
-                "completed_races": total,
-                "hot_umaban": [{"val": k, "count": c, "rate": round(c/total*100)} for k, c in sorted(um_count.items(), key=lambda x: -x[1])[:5]],
-                "hot_ninki": [{"val": k, "count": c, "rate": round(c/total*100)} for k, c in sorted(nk_count.items(), key=lambda x: -x[1])[:5]],
-                "hot_waku": [{"val": k, "count": c, "rate": round(c/total*100)} for k, c in sorted(wk_count.items(), key=lambda x: -x[1])[:5]],
-            })
-        except Exception:
-            pass
+        total = trend["completed_races"]
+        venues_data.append({
+            "venue": venue_name,
+            "completed_races": total,
+            "hot_umaban": [{"val": k, "count": v["count"], "rate": v["rate"]} for k, v in sorted(trend["umaban"].items(), key=lambda x: -x[1]["count"])[:5]],
+            "hot_ninki":  [{"val": k, "count": v["count"], "rate": v["rate"]} for k, v in sorted(trend["ninki"].items(),  key=lambda x: -x[1]["count"])[:5]],
+            "hot_waku":   [{"val": k, "count": v["count"], "rate": v["rate"]} for k, v in sorted(trend["waku"].items(),   key=lambda x: -x[1]["count"])[:5]],
+        })
     return jsonify({"date": today, "venues": venues_data})
 
 
@@ -1298,12 +1315,14 @@ def api_race_predict():
 
     has_odds = any(h["tan_odds"] is not None for h in horses)
     scored = calc_prerace_score(horses, venue, days=days)
+    today_trend = _calc_today_trend(venue)
     return jsonify({
         "venue": venue,
         "race": race_no,
         "horses": scored,
         "has_odds": has_odds,
         "data_days": days,
+        "today_trend": today_trend,
     })
 
 
