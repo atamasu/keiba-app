@@ -589,7 +589,7 @@ function showTab(name) {
   if (name === 'collect') loadRecent();
 }
 
-const API = (location.origin && location.origin !== 'null') ? location.origin : '';
+const API = (location.protocol && location.host) ? (location.protocol + '//' + location.host) : '';
 
 // ── レース予想 ────────────────────────────────
 const WAKU_BG_P  = ['','#f3f4f6','#1f2937','#fee2e2','#dbeafe','#fef9c3','#dcfce7','#ffedd5','#fce7f3'];
