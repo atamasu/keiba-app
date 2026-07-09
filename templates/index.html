@@ -681,14 +681,33 @@ async function loadPredict() {
         const col = WAKU_COL_P[wi] || '#111';
         const medal = ['🥇','🥈','🥉'][i];
         const oddsLine = hasOdds
-          ? `単勝 ${h.tan_odds ?? '-'} (${h.ninki}人気)<br>複勝 ${h.fuku_odds || '-'}`
+          ? `単勝 ${h.tan_odds ?? '-'} (${h.ninki}人気) ／ 複勝 ${h.fuku_odds || '-'}`
           : `枠${h.waku}(${WAKU_NAME_P[wi]})`;
+
+        // 推薦理由：3要素のうち高い順に文章生成
+        const factors = [
+          { label: `枠${h.waku}の入着率`, val: h.waku_rate,  weight: hasOdds ? 0.30 : 0.45 },
+          { label: `${h.ninki}番人気の入着率`, val: h.ninki_rate, weight: 0.45 },
+          { label: `馬番${h.umaban}の入着率`, val: h.umaban_rate, weight: hasOdds ? 0.25 : 0.55 },
+        ].filter(f => f.val > 0 && (hasOdds || f.label !== `${h.ninki}番人気の入着率`))
+         .sort((a,b) => (b.val * b.weight) - (a.val * a.weight));
+
+        const reasonLines = factors.slice(0,2).map(f =>
+          `<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:3px">
+            <span style="opacity:.8;font-size:11px">${f.label}</span>
+            <strong style="font-size:12px">${f.val}%</strong>
+          </div>`
+        ).join('');
+
         html += `<div style="flex:1;min-width:160px;padding:14px;border-radius:12px;background:${bg};color:${col};box-shadow:0 2px 8px rgba(0,0,0,.1)">
-          <div style="font-size:20px;margin-bottom:4px">${medal}</div>
-          <div style="font-size:22px;font-weight:700">${h.umaban}番</div>
-          <div style="font-size:13px;margin-bottom:6px;opacity:.85">${h.name || ''}</div>
-          <div style="font-size:12px;line-height:1.7">${oddsLine}</div>
-          <div style="font-size:12px;margin-top:6px">スコア: <strong>${h.score}</strong></div>
+          <div style="font-size:20px;margin-bottom:2px">${medal}</div>
+          <div style="font-size:22px;font-weight:700">${h.umaban}番 ${h.name || ''}</div>
+          <div style="font-size:12px;margin:6px 0;opacity:.85">${oddsLine}</div>
+          <div style="border-top:1px solid rgba(255,255,255,.3);margin:8px 0;padding-top:8px">
+            <div style="font-size:10px;opacity:.7;margin-bottom:4px">📌 推薦理由</div>
+            ${reasonLines}
+          </div>
+          <div style="font-size:11px;margin-top:6px;opacity:.8">総合スコア: <strong>${h.score}</strong></div>
         </div>`;
       });
       html += '</div>';
