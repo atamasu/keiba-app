@@ -1692,12 +1692,32 @@ def api_predict_results():
                         "wide_pay": wide_pay,
                         "wide_rate": wide_rate,
                     })
+            # matchedが2頭以上の場合、一致馬番からワイド配当を逆引き（過去ログ対応）
+            matched_wide = []
+            if len(matched) >= 2:
+                from itertools import combinations
+                for a, b in combinations(sorted(matched, key=lambda x: int(x) if x.isdigit() else 99), 2):
+                    nums = sorted([a, b], key=int)
+                    key = f"{nums[0]}-{nums[1]}"
+                    wd = wide_rows.get(key, {})
+                    if wd.get("pay"):
+                        try:
+                            pay_int = int(wd["pay"])
+                            matched_wide.append({
+                                "a": a, "b": b,
+                                "wide_pay": f"{pay_int:,}円",
+                                "wide_rate": f"{pay_int / 100:.1f}倍",
+                            })
+                        except (ValueError, TypeError):
+                            pass
+
             records.append({
                 "date": d_str, "venue": venue, "race": race,
                 "pred": sorted(pred), "actual": sorted(actual),
                 "matched": sorted(matched), "hit": is_hit,
                 "ana_pick": ana_pick, "ana_hit": ana_hit,
                 "pair_hits": pair_hits,
+                "matched_wide": matched_wide,
                 "ninki1": result_row.get("人気1",""), "ninki2": result_row.get("人気2",""), "ninki3": result_row.get("人気3",""),
             })
         else:
