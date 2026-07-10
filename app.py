@@ -1323,6 +1323,7 @@ def parse_deba_table(html):
                 continue
         elif current_waku:
             # 枠番セルなし → 同枠2頭目以降
+            waku = current_waku
             umaban_idx = 0
         else:
             continue
@@ -1372,7 +1373,7 @@ def parse_deba_table(html):
                 fuku_odds = f"{m_fuku.group(1)}-{m_fuku.group(2)}"
 
         horses.append({
-            "umaban": umaban,
+            "umaban": umaban_raw,
             "waku": waku,
             "name": name,
             "tan_odds": tan_odds,
