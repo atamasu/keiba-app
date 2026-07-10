@@ -1315,6 +1315,7 @@ def parse_deba_table(html):
         if waku_td:
             waku = waku_td.get_text(strip=True).translate(_z2h)
             if not re.match(r'^[1-8]$', waku):
+                current_waku = ""   # 無効な枠番行はリセット（次行への引き継ぎ防止）
                 continue
             current_waku = waku
             try:
