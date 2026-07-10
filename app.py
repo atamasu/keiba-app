@@ -1504,10 +1504,15 @@ def api_race_predict():
             msg = "出走表が空です（レース前または開催なし）"
         return jsonify({"error": msg, "horses": [], "debug": parse_debug}), 200
 
-    has_odds    = any(h["tan_odds"] is not None for h in horses)
-    today_trend = _calc_today_trend(venue)
-    scored      = calc_prerace_score(horses, venue, days=days, min_odds=min_odds, today_trend=today_trend)
-    patterns = _calc_venue_patterns(venue, days=days)
+    try:
+        has_odds    = any(h["tan_odds"] is not None for h in horses)
+        today_trend = _calc_today_trend(venue)
+        scored      = calc_prerace_score(horses, venue, days=days, min_odds=min_odds, today_trend=today_trend)
+        patterns    = _calc_venue_patterns(venue, days=days)
+    except Exception as e:
+        import traceback
+        return jsonify({"error": f"スコア計算エラー: {e}", "horses": [], "debug": traceback.format_exc()}), 200
+
     return jsonify({
         "venue": venue,
         "race": race_no,
