@@ -1530,12 +1530,18 @@ def api_race_predict():
 
 
 PREDICT_LOG_FILE = os.path.join(DATA_DIR, "predict_log.csv")
-PREDICT_LOG_FIELDS = ["date", "venue", "race", "rank1", "rank2", "rank3", "ana_pick", "logged_at"]
+PREDICT_LOG_FIELDS = [
+    "date", "venue", "race",
+    "rank1", "rank2", "rank3",
+    "pair1_a", "pair1_b", "pair2_a", "pair2_b", "pair3_a", "pair3_b",
+    "ana_pick", "logged_at",
+]
 _predict_log_lock = threading.Lock()
 
 
-def _append_predict_log(date_str, venue, race, rank1, rank2, rank3, ana_pick=""):
-    """予想ログ（スコア上位3頭のumaban＋穴馬候補）をCSVに追記する。同日同レースは上書き。"""
+def _append_predict_log(date_str, venue, race, rank1, rank2, rank3,
+                        ana_pick="", pairs=None):
+    """予想ログをCSVに追記する。同日同レースは上書き。"""
     rows = []
     if os.path.exists(PREDICT_LOG_FILE):
         try:
@@ -1543,29 +1549,42 @@ def _append_predict_log(date_str, venue, race, rank1, rank2, rank3, ana_pick="")
                 rows = list(csv.DictReader(f))
         except Exception:
             rows = []
-    # 同日・同場・同Rは最新で置き換え
     rows = [r for r in rows if not (r["date"] == date_str and r["venue"] == venue and r["race"] == str(race))]
+    pairs = pairs or []
     import datetime as _dt
-    rows.append({
+    row = {
         "date": date_str, "venue": venue, "race": str(race),
         "rank1": rank1, "rank2": rank2, "rank3": rank3,
+        "pair1_a": pairs[0][0] if len(pairs) > 0 else "",
+        "pair1_b": pairs[0][1] if len(pairs) > 0 else "",
+        "pair2_a": pairs[1][0] if len(pairs) > 1 else "",
+        "pair2_b": pairs[1][1] if len(pairs) > 1 else "",
+        "pair3_a": pairs[2][0] if len(pairs) > 2 else "",
+        "pair3_b": pairs[2][1] if len(pairs) > 2 else "",
         "ana_pick": ana_pick,
         "logged_at": _dt.datetime.now().strftime("%H:%M"),
-    })
+    }
+    # 旧フォーマットの行にはペア列がない場合があるのでデフォルト補完
+    for old in rows:
+        for f in PREDICT_LOG_FIELDS:
+            old.setdefault(f, "")
+    rows.append(row)
     with open(PREDICT_LOG_FILE, "w", encoding="utf-8", newline="") as f:
-        w = csv.DictWriter(f, fieldnames=PREDICT_LOG_FIELDS)
+        w = csv.DictWriter(f, fieldnames=PREDICT_LOG_FIELDS, extrasaction="ignore")
         w.writeheader()
         w.writerows(rows)
 
 
 @app.route("/api/log_prediction", methods=["POST"])
 def api_log_prediction():
-    """JSから予想ペア生成時に呼ばれ、スコア上位3頭のumabanを記録する。"""
+    """JSから予想ペア生成時に呼ばれ、スコア上位3頭＋推奨ペア3組を記録する。"""
     data = request.get_json(force=True) or {}
     venue    = data.get("venue", "")
     race     = data.get("race", 0)
-    top3     = data.get("top3", [])   # umaban文字列リスト（スコア順1〜3位）
-    ana_pick = data.get("ana_pick", "")  # 穴馬候補umaban
+    top3     = data.get("top3", [])
+    ana_pick = data.get("ana_pick", "")
+    # pairs: [[a_umaban, b_umaban], ...] 最大3組
+    pairs    = data.get("pairs", [])
     if not venue or not race or not top3:
         return jsonify({"ok": False}), 400
     r1 = top3[0] if len(top3) > 0 else ""
@@ -1573,7 +1592,8 @@ def api_log_prediction():
     r3 = top3[2] if len(top3) > 2 else ""
     with _predict_log_lock:
         try:
-            _append_predict_log(date.today().isoformat(), venue, race, r1, r2, r3, ana_pick)
+            _append_predict_log(date.today().isoformat(), venue, race, r1, r2, r3,
+                                ana_pick=ana_pick, pairs=pairs)
         except Exception as e:
             return jsonify({"ok": False, "error": str(e)}), 500
     return jsonify({"ok": True})
@@ -1626,11 +1646,22 @@ def api_predict_results():
             ana_hit   = (ana_pick in actual) if ana_pick else None
             total    += 1
             if is_hit: hit += 1
+            # ペア別的中判定
+            pair_hits = []
+            for i in range(1, 4):
+                pa = log.get(f"pair{i}_a", "")
+                pb = log.get(f"pair{i}_b", "")
+                if pa and pb:
+                    pair_hits.append({
+                        "no": i, "a": pa, "b": pb,
+                        "hit": pa in actual and pb in actual,
+                    })
             records.append({
                 "date": d_str, "venue": venue, "race": race,
                 "pred": sorted(pred), "actual": sorted(actual),
                 "matched": sorted(matched), "hit": is_hit,
                 "ana_pick": ana_pick, "ana_hit": ana_hit,
+                "pair_hits": pair_hits,
                 "ninki1": result_row.get("人気1",""), "ninki2": result_row.get("人気2",""), "ninki3": result_row.get("人気3",""),
             })
         else:

@@ -670,13 +670,6 @@ async function loadPredict() {
     const anaCandidates = byScore.filter(h => h.ninki && parseInt(h.ninki) >= 5);
     const anaPick = anaCandidates[0] || null;
 
-    // 予想ログ送信（スコア上位3頭 + 穴馬候補のumabanを記録）
-    const top3umabans = byScore.slice(0,3).map(h => h.umaban);
-    fetch(`${API}/api/log_prediction`, {
-      method: 'POST',
-      headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({ venue, race: parseInt(race), top3: top3umabans, ana_pick: anaPick?.umaban || '' })
-    }).catch(()=>{});
     const maxScore = byScore[0]?.score || 1;
 
     // 複勝オッズの最小値を取得するヘルパー（"1.5-2.3" → 1.5）
@@ -801,6 +794,15 @@ async function loadPredict() {
       ? sortedPairs.filter(p => p.estWide === null || p.estWide >= wideFilter)
       : sortedPairs;
     const showPairs = filteredPairs.slice(0, 3);
+
+    // 予想ログ送信（ペア確定後に送信）
+    const top3umabans = byScore.slice(0,3).map(h => h.umaban);
+    const logPairs = showPairs.map(p => [p.a.umaban, p.b.umaban]);
+    fetch(`${API}/api/log_prediction`, {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({ venue, race: parseInt(race), top3: top3umabans, ana_pick: anaPick?.umaban || '', pairs: logPairs })
+    }).catch(()=>{});
 
     html += `<div style="margin-bottom:16px">
       <div style="font-size:14px;font-weight:700;color:#1e40af;margin-bottom:8px">
@@ -2150,6 +2152,14 @@ async function loadHitRate() {
               ? `<span style="color:#c2410c;font-weight:700">🎲 穴馬${r.ana_pick}番 ✅的中</span>`
               : `<span style="color:#9ca3af">🎲 穴馬${r.ana_pick}番 ハズレ</span>`)
           : '';
+        // ペア的中表示
+        const pairHits = (r.pair_hits || []);
+        const pairStr = pairHits.length
+          ? pairHits.map(p => p.hit
+              ? `<span style="background:#dcfce7;color:#166534;border-radius:4px;padding:1px 6px;font-size:11px;font-weight:700">ペア${p.no} ✅ ${p.a}・${p.b}番</span>`
+              : `<span style="background:#f3f4f6;color:#6b7280;border-radius:4px;padding:1px 6px;font-size:11px">ペア${p.no} ${p.a}・${p.b}番</span>`
+            ).join(' ')
+          : '';
         html += `<div style="padding:8px 10px;border:1px solid #e5e7eb;border-radius:8px;margin-bottom:6px;${isHit?'background:#f0fdf4':''}">
           <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px">
             <span style="font-weight:600;font-size:13px">${r.date} ${r.venue} ${r.race}R</span>
@@ -2159,6 +2169,7 @@ async function loadHitRate() {
             予想: <strong>${predStr}</strong> → 結果: ${actStr}
             ${matchStr ? `<span style="color:#16a34a;margin-left:4px">(${matchStr})</span>` : ''}
           </div>
+          ${pairStr ? `<div style="margin-top:5px;display:flex;gap:4px;flex-wrap:wrap">${pairStr}</div>` : ''}
           ${anaStr ? `<div style="font-size:12px;margin-top:3px">${anaStr}</div>` : ''}
         </div>`;
       });
