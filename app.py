@@ -1647,15 +1647,50 @@ def api_predict_results():
             ana_hit   = (ana_pick in actual) if ana_pick else None
             total    += 1
             if is_hit: hit += 1
-            # ペア別的中判定
+
+            # ワイドCSV読み込み（配当参照用）
+            wide_rows = {}  # "a-b" → {"pay": str, "ninki": str}
+            wide_csv = os.path.join(DATA_DIR, d_str, f"{venue}.csv")
+            if os.path.exists(wide_csv):
+                try:
+                    with open(wide_csv, encoding="utf-8") as f:
+                        for wr in csv.DictReader(f):
+                            if wr.get("R", "") == race:
+                                combo = wr.get("組み合わせ", "").strip()
+                                # 組み合わせを正規化（小→大の順にソート）
+                                nums = sorted(re.findall(r'\d+', combo), key=int)
+                                if len(nums) == 2:
+                                    wide_rows[f"{nums[0]}-{nums[1]}"] = {
+                                        "pay": wr.get("配当円", ""),
+                                        "ninki": wr.get("人気", ""),
+                                    }
+                except Exception:
+                    pass
+
+            # ペア別的中判定＋配当取得
             pair_hits = []
             for i in range(1, 4):
                 pa = log.get(f"pair{i}_a", "")
                 pb = log.get(f"pair{i}_b", "")
                 if pa and pb:
+                    is_pair_hit = pa in actual and pb in actual
+                    wide_pay = wide_rate = ""
+                    if is_pair_hit:
+                        nums = sorted([pa, pb], key=int)
+                        key = f"{nums[0]}-{nums[1]}"
+                        wd = wide_rows.get(key, {})
+                        if wd.get("pay"):
+                            try:
+                                pay_int = int(wd["pay"])
+                                wide_pay = f"{pay_int:,}円"
+                                wide_rate = f"{pay_int / 100:.1f}倍"
+                            except (ValueError, TypeError):
+                                pass
                     pair_hits.append({
                         "no": i, "a": pa, "b": pb,
-                        "hit": pa in actual and pb in actual,
+                        "hit": is_pair_hit,
+                        "wide_pay": wide_pay,
+                        "wide_rate": wide_rate,
                     })
             records.append({
                 "date": d_str, "venue": venue, "race": race,
