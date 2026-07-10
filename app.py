@@ -1233,17 +1233,34 @@ def api_recent():
 
 def fetch_race_entries(venue_name, race_no):
     """keiba.go.jp の DebaTable から馬番・枠番・馬名・単勝・複勝オッズを取得"""
+    horses, _ = fetch_race_entries_debug(venue_name, race_no)
+    return horses
+
+
+def fetch_race_entries_debug(venue_name, race_no):
+    """fetch_race_entriesのデバッグ情報付き版。(horses, debug_code) を返す。"""
     code = VENUE_CODES.get(venue_name)
     if not code:
-        return []
+        return [], "no_venue_code"
     today = date.today().isoformat()
     date_fmt = today.replace("-", "%2F")
     url = f"https://www.keiba.go.jp/KeibaWeb/TodayRaceInfo/DebaTable?k_raceDate={date_fmt}&k_raceNo={race_no}&k_babaCode={code}"
     try:
         html = fetch_html(url, timeout=10)
     except Exception:
-        return []
-    return parse_deba_table(html)
+        return [], "fetch_error"
+    # テーブルの有無を先に確認
+    soup_check = BeautifulSoup(html, "html.parser")
+    tbl = soup_check.find("table")
+    if not tbl:
+        return [], "no_table"
+    trs = tbl.find_all("tr")
+    if len(trs) <= 1:
+        return [], "empty_table"
+    horses = parse_deba_table(html)
+    if not horses:
+        return [], "all_filtered"
+    return horses, "ok"
 
 
 def parse_deba_table(html):
@@ -1266,12 +1283,15 @@ def parse_deba_table(html):
     current_waku = ""
     rows = table.find_all("tr")
 
+    seen_umabans = set()
+
     for tr in rows:
         tds = tr.find_all("td")
         if not tds:
             continue
 
-        # 行の中に waku[1-8] クラスを持つtdを探す
+        # ── 枠番セル検出 ──────────────────────────────────────────
+        # 方法A: waku[1-8] クラスを持つtdを探す（最も確実）
         waku_td = None
         for td in tds:
             td_cls = " ".join(td.get("class") or [])
@@ -1279,38 +1299,54 @@ def parse_deba_table(html):
                 waku_td = td
                 break
 
+        # 方法B: クラスなし・rowspanあり・内容1-8（フォールバック）
+        if not waku_td:
+            ft = tds[0]
+            ft_text = ft.get_text(strip=True).translate(_z2h)
+            if ft.get("rowspan") and re.match(r'^[1-8]$', ft_text):
+                waku_td = ft
+
         if waku_td:
-            # 枠番セルが存在 → その枠の最初の馬
             waku = waku_td.get_text(strip=True).translate(_z2h)
             if not re.match(r'^[1-8]$', waku):
                 continue
             current_waku = waku
-            # umabanセルはwaku_tdの次
             try:
                 umaban_idx = tds.index(waku_td) + 1
             except ValueError:
                 continue
         elif current_waku:
-            # 枠番セルなし → 同枠2頭目以降（先頭がumaban）
+            # 枠番セルなし → 同枠2頭目以降
             umaban_idx = 0
         else:
             continue
 
+        # ── 馬番取得 ──────────────────────────────────────────────
         if len(tds) <= umaban_idx:
             continue
-        umaban = tds[umaban_idx].get_text(strip=True).translate(_z2h)
-        if not re.match(r'^\d+$', umaban) or not (1 <= int(umaban) <= 99):
+        umaban_raw = tds[umaban_idx].get_text(strip=True).translate(_z2h)
+        if not re.match(r'^\d+$', umaban_raw):
+            continue
+        umaban_int = int(umaban_raw)
+        if not (1 <= umaban_int <= 99):
             continue
 
-        # 馬名: セルの最初のテキストノードだけ取る（<br>で馬齢・毛色が続くため get_text は使わない）
+        # ── 馬名取得 ──────────────────────────────────────────────
         name = ""
         if len(tds) > umaban_idx + 1:
             name_td = tds[umaban_idx + 1]
+            # <br>より前のテキストノードのみ取得
             name = next((s.strip() for s in name_td.strings if s.strip()), "")
 
-        # 馬名に日本語(カタカナ・漢字・ひらがな)が含まれなければ統計行とみなしスキップ
-        if not re.search(r'[぀-鿿ｦ-ﾟ]', name):
+        # 馬名バリデーション（数字・記号・空のみは統計行とみなす）
+        # 日本語必須は廃止し、2文字以上かつ数字のみでないことを確認
+        if not name or len(name) < 2 or re.match(r'^[\d\s\-\.\+\/\\]+$', name):
             continue
+
+        # 同じ馬番の重複登録を防ぐ
+        if umaban_raw in seen_umabans:
+            continue
+        seen_umabans.add(umaban_raw)
 
         # オッズ列 (class=odds_weight)
         odds_td = tr.find("td", class_="odds_weight")
@@ -1449,28 +1485,18 @@ def api_race_predict():
     if not venue or venue not in VENUE_CODES:
         return jsonify({"error": "競馬場名が不正です"}), 400
 
-    horses = fetch_race_entries(venue, race_no)
+    horses, parse_debug = fetch_race_entries_debug(venue, race_no)
     if not horses:
-        # デバッグ: 生HTMLを少量返してパース状況を確認
-        code = VENUE_CODES.get(venue, "")
-        today = date.today().isoformat()
-        date_fmt = today.replace("-", "%2F")
-        debug_url = f"https://www.keiba.go.jp/KeibaWeb/TodayRaceInfo/DebaTable?k_raceDate={date_fmt}&k_raceNo={race_no}&k_babaCode={code}"
-        debug_info = ""
-        try:
-            raw_html = fetch_html(debug_url, timeout=10)
-            soup_d = BeautifulSoup(raw_html, "html.parser")
-            tbl = soup_d.find("table")
-            if tbl:
-                trs = tbl.find_all("tr")
-                debug_info = f"table行数={len(trs)} / 先頭3行テキスト: " + " | ".join(
-                    str([td.get_text(strip=True)[:10] for td in tr.find_all("td")[:4]]) for tr in trs[:3]
-                )
-            else:
-                debug_info = "tableタグなし / body抜粋: " + raw_html[200:400]
-        except Exception as e:
-            debug_info = f"fetch失敗: {e}"
-        return jsonify({"error": f"出走表を取得できませんでした。debug={debug_info}", "horses": []}), 200
+        msg = "出走表を取得できませんでした"
+        if parse_debug == "no_table":
+            msg = "出走表ページにテーブルがありません（レース終了後または開催なし）"
+        elif parse_debug == "fetch_error":
+            msg = "keiba.go.jpへの接続に失敗しました（時間をおいて再試行してください）"
+        elif parse_debug == "all_filtered":
+            msg = "馬情報のパースに失敗しました（運営にお知らせください）"
+        elif parse_debug == "empty_table":
+            msg = "出走表が空です（レース前または開催なし）"
+        return jsonify({"error": msg, "horses": [], "debug": parse_debug}), 200
 
     has_odds    = any(h["tan_odds"] is not None for h in horses)
     today_trend = _calc_today_trend(venue)

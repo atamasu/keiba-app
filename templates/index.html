@@ -620,7 +620,17 @@ async function loadPredict() {
     const res = await fetch(url);
     const d = await res.json();
     if (!d.horses || d.horses.length === 0) {
-      area.innerHTML = `<p style="color:#ef4444">${d.error || '出走表を取得できませんでした'}</p>`; return;
+      const debugHint = d.debug === 'no_table'
+        ? '<br><span style="font-size:12px;color:#6b7280">※ レース終了後または本日の開催なし</span>'
+        : d.debug === 'fetch_error'
+        ? '<br><span style="font-size:12px;color:#6b7280">※ ネットワークエラー。少し待ってから再試行してください</span>'
+        : d.debug === 'all_filtered'
+        ? '<br><span style="font-size:12px;color:#6b7280">※ HTMLパースエラー。別の競馬場・レースで試してください</span>'
+        : '';
+      area.innerHTML = `<div style="background:#fef2f2;border:1px solid #fca5a5;border-radius:10px;padding:12px 14px">
+        <p style="color:#991b1b;font-weight:600;margin:0">${d.error || '出走表を取得できませんでした'}</p>
+        ${debugHint}
+      </div>`; return;
     }
 
     const horses  = d.horses;  // 馬番順（APIから）
