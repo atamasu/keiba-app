@@ -618,7 +618,14 @@ async function loadPredict() {
   try {
     const url = `${API}/api/race_predict?venue=${encodeURIComponent(venue)}&race=${race}&days=${days}`;
     const res = await fetch(url);
-    const d = await res.json();
+    const text = await res.text();
+    let d;
+    try { d = JSON.parse(text); } catch(_) {
+      area.innerHTML = `<div style="background:#fef2f2;border:1px solid #fca5a5;border-radius:10px;padding:12px 14px">
+        <p style="color:#991b1b;font-weight:600;margin:0">サーバーエラー（${res.status}）</p>
+        <span style="font-size:12px;color:#6b7280">※ 時間をおいて再試行してください</span>
+      </div>`; return;
+    }
     if (!d.horses || d.horses.length === 0) {
       const debugHint = d.debug === 'no_table'
         ? '<br><span style="font-size:12px;color:#6b7280">※ レース終了後または本日の開催なし</span>'
