@@ -1038,7 +1038,7 @@ def _calc_venue_patterns(venue_name, days=90):
 
             # 穴馬判定（人気が4以上）
             try:
-                nk_int = int(nk)
+                nk_int = int(float(nk))
             except (ValueError, TypeError):
                 nk_int = 0
             if nk_int >= 4:
@@ -1064,8 +1064,14 @@ def _calc_venue_patterns(venue_name, days=90):
         combo_rates.append({"ninki": nk, "waku": wk, "count": cnt, "rate": rate})
 
     # 特に強い組み合わせ（入着率上位5、ただし4番人気以降に絞る）
+    def _safe_int(v):
+        try:
+            return int(float(v))
+        except (ValueError, TypeError):
+            return 0
+
     ana_combos = sorted(
-        [c for c in combo_rates if int(c["ninki"]) >= 4],
+        [c for c in combo_rates if _safe_int(c["ninki"]) >= 4],
         key=lambda x: -x["rate"]
     )[:5]
 
