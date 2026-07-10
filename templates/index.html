@@ -383,10 +383,6 @@
       </button>
       <div id="collect-log" class="log-box"></div>
     </div>
-    <div class="card">
-      <h2>収集済み直近10日</h2>
-      <div id="recent-list"><div class="loading-center">読み込み中...</div></div>
-    </div>
   </div>
 
   <!-- レース予想タブ -->
@@ -2084,52 +2080,6 @@ async function loadHitRate() {
       </div>
       <div style="font-size:11px;color:#6b7280;margin-bottom:10px">ワイド: 上位3頭から2頭以上が3着以内 ／ 穴馬: 候補が3着以内</div>`;
 
-    // 直近10件の詳細
-    const recent = d.records.filter(r => r.actual !== null).slice(0, 10);
-    if (recent.length > 0) {
-      html += `<div style="font-size:13px;font-weight:600;margin-bottom:8px">直近の予想履歴</div>`;
-      recent.forEach(r => {
-        const isHit = r.hit;
-        const hitLabel = isHit
-          ? `<span style="background:#dcfce7;color:#166534;border-radius:6px;padding:2px 8px;font-size:12px;font-weight:700">的中</span>`
-          : `<span style="background:#fee2e2;color:#991b1b;border-radius:6px;padding:2px 8px;font-size:12px">ハズレ</span>`;
-        const predStr  = r.pred.join('・') + '番';
-        const actStr   = r.actual.join('・') + '番';
-        const matchStr = r.matched.length ? `一致: ${r.matched.join('・')}番` : '';
-        const anaStr   = r.ana_pick
-          ? (r.ana_hit
-              ? `<span style="color:#c2410c;font-weight:700">🎲 穴馬${r.ana_pick}番 ✅的中</span>`
-              : `<span style="color:#9ca3af">🎲 穴馬${r.ana_pick}番 ハズレ</span>`)
-          : '';
-        // ペア的中表示
-        const pairHits = (r.pair_hits || []);
-        // ペアデータあり（今日以降）
-        const pairStr = pairHits.length
-          ? pairHits.map(p => {
-              if (p.hit) {
-                const odds = p.wide_pay ? ` ${p.wide_pay}（${p.wide_rate}）` : '';
-                return `<span style="background:#dcfce7;color:#166534;border-radius:4px;padding:2px 8px;font-size:11px;font-weight:700">ペア${p.no} ✅ ${p.a}・${p.b}番${odds}</span>`;
-              }
-              return `<span style="background:#f3f4f6;color:#6b7280;border-radius:4px;padding:2px 8px;font-size:11px">ペア${p.no} ${p.a}・${p.b}番</span>`;
-            }).join(' ')
-          // ペアデータなし（過去ログ）: matched_wideから配当を表示
-          : (r.matched_wide || []).map(w =>
-              `<span style="background:#dcfce7;color:#166534;border-radius:4px;padding:2px 8px;font-size:11px;font-weight:700">✅ ${w.a}・${w.b}番 ${w.wide_pay}（${w.wide_rate}）</span>`
-            ).join(' ');
-        html += `<div style="padding:8px 10px;border:1px solid #e5e7eb;border-radius:8px;margin-bottom:6px;${isHit?'background:#f0fdf4':''}">
-          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px">
-            <span style="font-weight:600;font-size:13px">${r.date} ${r.venue} ${r.race}R</span>
-            ${hitLabel}
-          </div>
-          <div style="font-size:12px;color:#6b7280">
-            予想: <strong>${predStr}</strong> → 結果: ${actStr}
-            ${matchStr ? `<span style="color:#16a34a;margin-left:4px">(${matchStr})</span>` : ''}
-          </div>
-          ${pairStr ? `<div style="margin-top:5px;display:flex;gap:4px;flex-wrap:wrap">${pairStr}</div>` : ''}
-          ${anaStr ? `<div style="font-size:12px;margin-top:3px">${anaStr}</div>` : ''}
-        </div>`;
-      });
-    }
     area.innerHTML = html;
   } catch(e) {
     area.innerHTML = `<p style="color:#ef4444;font-size:13px">エラー: ${e.message}</p>`;
