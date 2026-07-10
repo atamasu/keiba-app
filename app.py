@@ -1491,7 +1491,11 @@ def api_race_predict():
     if not venue or venue not in VENUE_CODES:
         return jsonify({"error": "競馬場名が不正です"}), 400
 
-    horses, parse_debug = fetch_race_entries_debug(venue, race_no)
+    try:
+        horses, parse_debug = fetch_race_entries_debug(venue, race_no)
+    except Exception as e:
+        import traceback
+        return jsonify({"error": f"出走表取得エラー: {e}", "horses": [], "debug": traceback.format_exc()}), 200
     if not horses:
         msg = "出走表を取得できませんでした"
         if parse_debug == "no_table":
