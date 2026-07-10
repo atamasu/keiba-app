@@ -782,15 +782,18 @@ async function loadPredict() {
       for (let j = i+1; j < top5.length; j++) {
         const a = top5[i], b = top5[j];
         const ew = hasOdds ? estWide(a, b) : null;
-        pairs.push({ a, b, combinedScore: (a.score||0)+(b.score||0), estWide: ew });
+        // 両馬が3番人気以内 → 人気同士フラグ（低オッズになりやすい）
+        const bothFavorite = hasOdds
+          && a.ninki && b.ninki
+          && parseInt(a.ninki) <= 3 && parseInt(b.ninki) <= 3;
+        pairs.push({ a, b, combinedScore: (a.score||0)+(b.score||0), estWide: ew, bothFavorite });
       }
     }
-    // combinedScore優先でソート（スコアが高い組み合わせを本命とする）
     const sortedPairs = pairs.sort((x,y) => y.combinedScore - x.combinedScore);
-    // フィルター: wideFilter倍以上のみ（null=複勝未発表は残す）、オッズ未発表時はフィルターなし
+    // フィルター: wideFilter倍以上 かつ 人気同士(両3番人気以内)は除外
     const filteredPairs = wideFilter > 0 && hasOdds
-      ? sortedPairs.filter(p => p.estWide === null || p.estWide >= wideFilter)
-      : sortedPairs;
+      ? sortedPairs.filter(p => !p.bothFavorite && (p.estWide === null || p.estWide >= wideFilter))
+      : sortedPairs.filter(p => !p.bothFavorite || !hasOdds);
     const showPairs = filteredPairs.slice(0, 3);
 
     // 予想ログ送信（ペア確定後に送信）
