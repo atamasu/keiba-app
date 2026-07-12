@@ -386,6 +386,20 @@
 
   <!-- レース予想タブ -->
   <div id="tab-predict" style="display:none">
+    <!-- 的中率カード（先に表示） -->
+    <div class="card" id="predict-hitrate-card">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
+        <h2 style="margin:0">📈 予想的中率</h2>
+        <select id="hitrate-days" onchange="loadHitRate()"
+          style="padding:6px 10px;border-radius:8px;border:1px solid #d1d5db;font-size:13px">
+          <option value="7">直近7日</option>
+          <option value="30" selected>直近30日</option>
+          <option value="90">直近90日</option>
+        </select>
+      </div>
+      <div id="hitrate-result">読み込み中...</div>
+    </div>
+
     <div class="card">
       <h2>🔮 レース予想</h2>
       <p style="color:#6b7280;font-size:13px;margin-bottom:12px">
@@ -423,20 +437,6 @@
         <button class="btn btn-primary" onclick="loadPredict()">予想を見る</button>
       </div>
       <div id="predict-result"></div>
-    </div>
-
-    <!-- 的中率カード -->
-    <div class="card" id="predict-hitrate-card" style="display:none">
-      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
-        <h2 style="margin:0">📈 予想的中率</h2>
-        <select id="hitrate-days" onchange="loadHitRate()"
-          style="padding:6px 10px;border-radius:8px;border:1px solid #d1d5db;font-size:13px">
-          <option value="7">直近7日</option>
-          <option value="30" selected>直近30日</option>
-          <option value="90">直近90日</option>
-        </select>
-      </div>
-      <div id="hitrate-result">読み込み中...</div>
     </div>
   </div>
 
@@ -738,6 +738,38 @@ async function loadPredict() {
     } else {
       html += `<div style="background:#f3f4f6;border-radius:10px;padding:10px 14px;font-size:13px;color:#6b7280;margin-bottom:14px">
         📊 今日の傾向: まだ完了レースがありません（レース後に自動更新されます）
+      </div>`;
+    }
+
+    // ── おすすめ3頭 ─────────────────────────────────────
+    {
+      const top3 = byScore.slice(0, 3);
+      const rankLabels = ['1位', '2位', '3位'];
+      const rankColors = ['#1e40af', '#065f46', '#92400e'];
+      const rankBg     = ['#eff6ff', '#ecfdf5', '#fff7ed'];
+      const rankBorder = ['#93c5fd', '#6ee7b7', '#fb923c'];
+      let top3html = top3.map((h, idx) => {
+        const wi  = parseInt(h.waku) || 0;
+        const bg  = WAKU_BG_P[wi] || '#f3f4f6';
+        const col = WAKU_COL_P[wi] || '#111';
+        const oddsStr = h.tan_odds ? `単勝 ${h.tan_odds}（${h.ninki || '-'}番人気）` : `（${h.ninki || '-'}番人気）`;
+        const fukuStr = h.fuku_odds ? ` ／ 複勝 ${h.fuku_odds}` : '';
+        const trendTag = h.trend_bonus > 0
+          ? `<span style="font-size:10px;background:#fef9c3;color:#92400e;border-radius:4px;padding:1px 5px;margin-left:4px">今日の流れ+${h.trend_bonus}</span>`
+          : '';
+        return `<div style="display:flex;align-items:center;gap:10px;padding:8px 10px;background:${rankBg[idx]};border:1px solid ${rankBorder[idx]};border-radius:10px;margin-bottom:6px">
+          <div style="font-size:11px;font-weight:700;color:${rankColors[idx]};min-width:24px;text-align:center">${rankLabels[idx]}</div>
+          <span style="width:30px;height:30px;border-radius:50%;background:${bg};color:${col};display:inline-flex;align-items:center;justify-content:center;font-size:13px;font-weight:700;flex-shrink:0">${h.waku}</span>
+          <div style="flex:1">
+            <div style="font-size:15px;font-weight:700">${h.umaban}番 ${h.name || ''}${trendTag}</div>
+            <div style="font-size:11px;color:#6b7280;margin-top:1px">${oddsStr}${fukuStr}</div>
+          </div>
+          <div style="text-align:right;font-size:11px;color:#6b7280">スコア<br><strong style="font-size:15px;color:${rankColors[idx]}">${h.score}</strong></div>
+        </div>`;
+      }).join('');
+      html += `<div style="background:#f8fafc;border:1.5px solid #94a3b8;border-radius:12px;padding:14px;margin-bottom:14px">
+        <div style="font-size:13px;font-weight:700;color:#1e40af;margin-bottom:10px">⭐ おすすめ3頭</div>
+        ${top3html}
       </div>`;
     }
 
