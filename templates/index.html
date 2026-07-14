@@ -1334,10 +1334,10 @@ async function loadSummary() {
   let fukuHtml = '';
   if (fukuData && (fukuData.recommend?.length || fukuData.waku?.length)) {
     // 人気別
-    const fukuRows = (fukuData.recommend || []).slice(0,5).map((r,i) => {
+    const fukuRows = (fukuData.recommend || []).slice(0,4).map((r,i) => {
       const roiColor = r.回収率 >= 100 ? '#16a34a' : r.回収率 >= 80 ? '#d97706' : '#64748b';
       return `<div class="summary-row">
-        <div style="font-size:16px;min-width:24px">${['🥇','🥈','🥉','4位','5位'][i]||''}</div>
+        <div style="font-size:16px;min-width:24px">${['🥇','🥈','🥉','4位'][i]||''}</div>
         <div class="summary-pop" style="font-size:18px;min-width:54px">${r.人気}人気</div>
         <div class="summary-detail">${r.出現数}件 / 出現率${r.出現率}%</div>
         <div style="text-align:right;font-size:18px;font-weight:900;color:${roiColor}">${r.回収率}%</div>
@@ -1345,7 +1345,7 @@ async function loadSummary() {
     }).join('');
 
     // 枠色別（回収率順 上位5）
-    const sortedWaku = [...(fukuData.waku || [])].sort((a,b) => b.回収率 - a.回収率).slice(0,5);
+    const sortedWaku = [...(fukuData.waku || [])].sort((a,b) => b.回収率 - a.回収率).slice(0,4);
     const wakuRows = sortedWaku.map((w,i) => {
       const wi = w.枠;
       const bg = WAKU_BG_S[wi] || '#f3f4f6';
@@ -1354,7 +1354,7 @@ async function loadSummary() {
       const roiColor = w.回収率 >= 100 ? '#16a34a' : w.回収率 >= 80 ? '#d97706' : '#64748b';
       const badge = `<span style="display:inline-flex;align-items:center;gap:4px"><span style="display:inline-block;width:24px;height:24px;line-height:24px;text-align:center;border-radius:50%;background:${bg};color:${col};font-size:13px;font-weight:700;border:1px solid #e2e8f0">${wi}</span><span>${name}枠</span></span>`;
       return `<div class="summary-row">
-        <div style="font-size:16px;min-width:24px">${['🥇','🥈','🥉','4位','5位'][i]||''}</div>
+        <div style="font-size:16px;min-width:24px">${['🥇','🥈','🥉','4位'][i]||''}</div>
         <div style="flex:1;font-weight:700">${badge}</div>
         <div class="summary-detail">${w.出現数}件 / ${w.出現率}%</div>
         <div style="text-align:right;font-size:18px;font-weight:900;color:${roiColor}">${w.回収率}%</div>
@@ -1362,11 +1362,11 @@ async function loadSummary() {
     }).join('');
 
     // 馬番別（回収率順 上位5）
-    const sortedUmaban = [...(fukuData.umaban || [])].sort((a,b) => b.回収率 - a.回収率).slice(0,5);
+    const sortedUmaban = [...(fukuData.umaban || [])].sort((a,b) => b.回収率 - a.回収率).slice(0,4);
     const umabanRows = sortedUmaban.map((u,i) => {
       const roiColor = u.回収率 >= 100 ? '#16a34a' : u.回収率 >= 80 ? '#d97706' : '#64748b';
       return `<div class="summary-row">
-        <div style="font-size:16px;min-width:24px">${['🥇','🥈','🥉','4位','5位'][i]||''}</div>
+        <div style="font-size:16px;min-width:24px">${['🥇','🥈','🥉','4位'][i]||''}</div>
         <div class="summary-pop" style="font-size:18px;min-width:54px">${u.馬番}番</div>
         <div class="summary-detail">${u.出現数}件 / ${u.出現率}%</div>
         <div style="text-align:right;font-size:18px;font-weight:900;color:${roiColor}">${u.回収率}%</div>
