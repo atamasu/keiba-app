@@ -553,7 +553,7 @@
 <script>
 let currentVenue = null;
 let currentBaba = null;
-let currentRaceDays = 7;
+let currentRaceDays = null;
 let currentRaceToday = false;
 let currentMinPop = null;
 let currentMaxPop = null;
@@ -1442,7 +1442,7 @@ async function loadVenues() {
 
 function selectVenue(venue, el) {
   currentVenue = venue;
-  document.querySelectorAll('.venue-btn').forEach(b => b.classList.remove('active'));
+  document.querySelectorAll('#venue-grid .venue-btn').forEach(b => b.classList.remove('active'));
   el.classList.add('active');
   loadStats();
 }
@@ -2070,7 +2070,7 @@ async function loadSanrenpuku() {
       const name = WAKU_NAME[wi] || wi;
       const roiColor = w.回収率 >= 100 ? '#16a34a' : w.回収率 >= 80 ? '#d97706' : '#ef4444';
       const badge = `<span style="display:inline-flex;align-items:center;gap:4px"><span style="display:inline-block;width:24px;height:24px;line-height:24px;text-align:center;border-radius:50%;background:${bg};color:${col};font-size:13px;font-weight:700;border:1px solid #e2e8f0">${wi}</span><span style="color:#374151">${name}枠</span></span>`;
-      html += `<tr style="border-top:1px solid #f1f5f9${i===0?' background:#fefce8':''}">
+      html += `<tr style="border-top:1px solid #f1f5f9${i===0?';background:#fefce8':''}">
         <td style="padding:8px 6px">${badge}</td>
         <td style="padding:8px 6px;text-align:right">${w.出現数}件</td>
         <td style="padding:8px 6px;text-align:right">${w.出現率}%</td>
@@ -2097,7 +2097,7 @@ async function loadSanrenpuku() {
         </tr>`;
     sortedUmaban.forEach((u, i) => {
       const roiColor = u.回収率 >= 100 ? '#16a34a' : u.回収率 >= 80 ? '#d97706' : '#ef4444';
-      html += `<tr style="border-top:1px solid #f1f5f9${i===0?' background:#fefce8':''}">
+      html += `<tr style="border-top:1px solid #f1f5f9${i===0?';background:#fefce8':''}">
         <td style="padding:8px 6px;font-weight:700">${i===0?'🥇 ':''}${u.馬番}番</td>
         <td style="padding:8px 6px;text-align:right">${u.出現数}件</td>
         <td style="padding:8px 6px;text-align:right">${u.出現率}%</td>

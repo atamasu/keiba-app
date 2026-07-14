@@ -51,10 +51,16 @@ def load_all_data(venue=None, days=None, today_only=False):
             for row in reader:
                 try:
                     row['競馬場'] = v
-                    row['人気'] = int(row['人気'])
-                    row['配当円'] = int(row['配当円'])
+                    _z2h_d = str.maketrans('０１２３４５６７８９', '0123456789')
+                    ninki_str = row.get('人気', '').translate(_z2h_d).strip()
+                    pay_str   = re.sub(r'[^\d]', '', row.get('配当円', '').translate(_z2h_d))
+                    if not ninki_str.isdigit() or not pay_str:
+                        continue
+                    row['競馬場'] = v
+                    row['人気'] = int(ninki_str)
+                    row['配当円'] = int(pay_str)
                     rows.append(row)
-                except:
+                except Exception:
                     pass
     return rows
 
@@ -563,7 +569,7 @@ def api_race_patterns():
 
     # レース番号ごとに人気別集計
     from collections import defaultdict
-    race_nums = sorted(set(r['R'] for r in rows), key=lambda x: int(x))
+    race_nums = sorted(set(r['R'] for r in rows), key=lambda x: int(x) if str(x).isdigit() else 0)
 
     patterns = {}
     for rno in race_nums:
@@ -599,7 +605,7 @@ def api_trend():
     days = request.args.get("days", 14, type=int)
     pops_param = request.args.get("pops")
     rows = load_all_data(days=days)
-    target_pops = [int(p) for p in pops_param.split(",")] if pops_param else None
+    target_pops = [int(p) for p in pops_param.split(",") if p.strip().isdigit()] if pops_param else None
     return jsonify(calc_trend(rows, target_pops))
 
 
@@ -1676,7 +1682,7 @@ def api_predict_results():
                     is_pair_hit = pa in actual and pb in actual
                     wide_pay = wide_rate = ""
                     if is_pair_hit:
-                        nums = sorted([pa, pb], key=int)
+                        nums = sorted([pa, pb], key=lambda x: int(x) if str(x).isdigit() else 99)
                         key = f"{nums[0]}-{nums[1]}"
                         wd = wide_rows.get(key, {})
                         if wd.get("pay"):
@@ -1696,8 +1702,8 @@ def api_predict_results():
             matched_wide = []
             if len(matched) >= 2:
                 from itertools import combinations
-                for a, b in combinations(sorted(matched, key=lambda x: int(x) if x.isdigit() else 99), 2):
-                    nums = sorted([a, b], key=int)
+                for a, b in combinations(sorted(matched, key=lambda x: int(x) if str(x).isdigit() else 99), 2):
+                    nums = sorted([a, b], key=lambda x: int(x) if str(x).isdigit() else 99)
                     key = f"{nums[0]}-{nums[1]}"
                     wd = wide_rows.get(key, {})
                     if wd.get("pay"):
