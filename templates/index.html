@@ -436,6 +436,7 @@
         </select>
         <button class="btn btn-primary" onclick="loadPredict()">予想を見る</button>
       </div>
+      <div id="predict-log-status" style="font-size:12px;min-height:16px;margin-bottom:4px"></div>
       <div id="predict-result"></div>
     </div>
   </div>
@@ -615,6 +616,43 @@ function initPredictVenues() {
     opt.value = v; opt.textContent = v;
     sel.appendChild(opt);
   });
+}
+
+// 予想ログ送信（リトライ最大2回）
+async function _sendPredictLog(venue, race, top3, ana_pick, pairs, attempt) {
+  attempt = attempt || 1;
+  const logStatusEl = document.getElementById('predict-log-status');
+  try {
+    const res = await fetch(`${API}/api/log_prediction`, {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({ venue, race, top3, ana_pick, pairs })
+    });
+    const d = await res.json().catch(() => ({}));
+    if (res.ok && d.ok) {
+      if (logStatusEl) {
+        logStatusEl.textContent = '📝 予想を記録しました';
+        logStatusEl.style.color = '#16a34a';
+        setTimeout(() => { if (logStatusEl) logStatusEl.textContent = ''; }, 3000);
+      }
+    } else if (attempt < 3) {
+      setTimeout(() => _sendPredictLog(venue, race, top3, ana_pick, pairs, attempt + 1), 2000);
+    } else {
+      if (logStatusEl) {
+        logStatusEl.textContent = '⚠️ 記録に失敗しました（通信エラー）';
+        logStatusEl.style.color = '#ef4444';
+      }
+    }
+  } catch(_) {
+    if (attempt < 3) {
+      setTimeout(() => _sendPredictLog(venue, race, top3, ana_pick, pairs, attempt + 1), 2000);
+    } else {
+      if (logStatusEl) {
+        logStatusEl.textContent = '⚠️ 記録に失敗しました（通信エラー）';
+        logStatusEl.style.color = '#ef4444';
+      }
+    }
+  }
 }
 
 async function loadPredict() {
@@ -823,14 +861,10 @@ async function loadPredict() {
       : sortedPairs.filter(p => !p.bothFavorite || !hasOdds);
     const showPairs = filteredPairs.slice(0, 3);
 
-    // 予想ログ送信（ペア確定後に送信）
+    // 予想ログ送信（ペア確定後）- リトライ付きで確実に記録
     const top3umabans = byScore.slice(0,3).map(h => h.umaban);
     const logPairs = showPairs.map(p => [p.a.umaban, p.b.umaban]);
-    fetch(`${API}/api/log_prediction`, {
-      method: 'POST',
-      headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({ venue, race: parseInt(race), top3: top3umabans, ana_pick: anaPick?.umaban || '', pairs: logPairs })
-    }).catch(()=>{});
+    _sendPredictLog(venue, parseInt(race), top3umabans, anaPick?.umaban || '', logPairs);
 
     html += `<div style="margin-bottom:16px">
       <div style="font-size:14px;font-weight:700;color:#1e40af;margin-bottom:8px">
