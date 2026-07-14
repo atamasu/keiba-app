@@ -1205,7 +1205,7 @@ def api_fukusho():
         rows = [r for r in rows if r['日付'] in set(dates)]
     fk = calc_fukusho_stats(rows)
     rec = recommend(fk["ninki"])
-    return jsonify({"stats": fk["ninki"], "waku": fk["waku"], "total": fk["total"], "recommend": rec, "venue": venue or "全競馬場"})
+    return jsonify({"stats": fk["ninki"], "waku": fk["waku"], "umaban": fk["umaban"], "total": fk["total"], "recommend": rec, "venue": venue or "全競馬場"})
 
 
 @app.route("/api/sanrenpuku")
