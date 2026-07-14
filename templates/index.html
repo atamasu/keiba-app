@@ -888,6 +888,73 @@ async function loadPredict() {
     }
     html += `</div>`;
 
+    // ── 三連複フォーメーション ─────────────────────────────
+    {
+      // 軸: スコア1位、相手: 2〜4位 + 穴馬候補（重複除外）、最大4頭
+      const jiku = byScore[0];
+      const aitePool = byScore.slice(1, 4).filter(h => h.umaban !== jiku.umaban);
+      if (anaPick && !aitePool.find(h => h.umaban === anaPick.umaban)) aitePool.push(anaPick);
+      const aite = aitePool.slice(0, 4);
+
+      if (jiku && aite.length >= 2) {
+        // C(aite.length, 2) の全組み合わせを生成
+        const formCombos = [];
+        for (let i = 0; i < aite.length; i++) {
+          for (let j = i+1; j < aite.length; j++) {
+            formCombos.push([aite[i], aite[j]]);
+          }
+        }
+        const showCombos = formCombos.slice(0, 3);
+        const comboColors = ['#1e40af','#065f46','#7c3aed'];
+        const comboBgs    = ['#eff6ff','#ecfdf5','#f5f3ff'];
+
+        const miniChip = (h, isJiku) => {
+          const wi = parseInt(h.waku)||0;
+          const bg = WAKU_BG_P[wi]||'#f3f4f6';
+          const col= WAKU_COL_P[wi]||'#111';
+          const label = isJiku ? `<span style="font-size:10px;background:#dc2626;color:#fff;border-radius:4px;padding:1px 5px;margin-left:4px">軸</span>` : '';
+          return `<div style="display:flex;align-items:center;gap:6px;padding:6px 8px;background:#fff;border-radius:8px;margin-bottom:4px">
+            <span style="width:24px;height:24px;border-radius:50%;background:${bg};color:${col};display:inline-flex;align-items:center;justify-content:center;font-size:11px;font-weight:700;flex-shrink:0">${h.waku}</span>
+            <div style="font-size:13px;font-weight:700">${h.umaban}番 ${h.name||''}${label}</div>
+            <div style="margin-left:auto;font-size:11px;color:#6b7280">スコア ${h.score}</div>
+          </div>`;
+        };
+
+        const aiteNums = aite.map(h => h.umaban).join('・');
+        let formHtml = `<div style="background:#fdf4ff;border:1.5px solid #a855f7;border-radius:12px;padding:14px;margin-bottom:14px">
+          <div style="font-size:13px;font-weight:700;color:#7c3aed;margin-bottom:4px">🎯 三連複フォーメーション（1頭軸）</div>
+          <div style="font-size:11px;color:#6b7280;margin-bottom:10px">軸 × 相手${aite.length}頭 → ${showCombos.length}点</div>
+          <div style="font-size:12px;color:#7c3aed;font-weight:600;margin-bottom:6px">【軸】</div>
+          ${miniChip(jiku, true)}
+          <div style="font-size:12px;color:#7c3aed;font-weight:600;margin:8px 0 6px">【相手 ${aiteNums}番】</div>
+          ${aite.map(h => miniChip(h, false)).join('')}
+          <div style="margin-top:10px;border-top:1px solid #e9d5ff;padding-top:10px">
+            <div style="font-size:12px;font-weight:600;color:#374151;margin-bottom:8px">購入点</div>`;
+
+        showCombos.forEach((combo, ci) => {
+          const [x, y] = combo;
+          const xwi = parseInt(x.waku)||0; const ywi = parseInt(y.waku)||0;
+          const xbg = WAKU_BG_P[xwi]||'#f3f4f6'; const ybg = WAKU_BG_P[ywi]||'#f3f4f6';
+          const xcol= WAKU_COL_P[xwi]||'#111';   const ycol= WAKU_COL_P[ywi]||'#111';
+          const jwi = parseInt(jiku.waku)||0;
+          const jbg = WAKU_BG_P[jwi]||'#f3f4f6'; const jcol= WAKU_COL_P[jwi]||'#111';
+          const badge = (h, bg, col) =>
+            `<span style="display:inline-flex;align-items:center;justify-content:center;width:22px;height:22px;border-radius:50%;background:${bg};color:${col};font-size:11px;font-weight:700">${h.umaban}</span>`;
+          formHtml += `<div style="display:flex;align-items:center;gap:6px;padding:6px 10px;background:${comboBgs[ci]};border:1px solid ${comboColors[ci]}33;border-radius:8px;margin-bottom:4px">
+            <span style="font-size:11px;font-weight:700;color:${comboColors[ci]};min-width:28px">${ci+1}点目</span>
+            ${badge(jiku,jbg,jcol)}
+            <span style="font-size:11px;color:#9ca3af">-</span>
+            ${badge(x,xbg,xcol)}
+            <span style="font-size:11px;color:#9ca3af">-</span>
+            ${badge(y,ybg,ycol)}
+            <span style="font-size:11px;color:#6b7280;margin-left:4px">${jiku.umaban}・${x.umaban}・${y.umaban}番</span>
+          </div>`;
+        });
+        formHtml += `</div></div>`;
+        html += formHtml;
+      }
+    }
+
     // ── 全馬テーブル ───────────────────────────────
     const oddsHeader = hasOdds
       ? '<th style="padding:8px;text-align:center">単勝</th><th style="padding:8px;text-align:center">複勝</th><th style="padding:8px;text-align:center">人気</th>'
