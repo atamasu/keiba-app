@@ -1246,8 +1246,8 @@ async function refreshToday(btn) {
 }
 
 function buildOverallRows(recs, totalRaces) {
-  const rankLabels = ['🥇','🥈','🥉','4位','5位','6位','7位','8位'];
-  return recs.map((r, i) => `<div class="summary-row">
+  const rankLabels = ['🥇','🥈','🥉','4位','5位'];
+  return recs.slice(0, 5).map((r, i) => `<div class="summary-row">
     <div class="summary-label">${rankLabels[i]||''}</div>
     <div class="summary-pop">${r.人気}人気</div>
     <div class="summary-detail">

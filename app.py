@@ -1146,9 +1146,9 @@ def api_today_live():
         venues_data.append({
             "venue": venue_name,
             "completed_races": total,
-            "hot_umaban": [{"val": k, "count": v["count"], "rate": v["rate"]} for k, v in sorted(trend["umaban"].items(), key=lambda x: -x[1]["count"])[:5]],
-            "hot_ninki":  [{"val": k, "count": v["count"], "rate": v["rate"]} for k, v in sorted(trend["ninki"].items(),  key=lambda x: -x[1]["count"])[:5]],
-            "hot_waku":   [{"val": k, "count": v["count"], "rate": v["rate"]} for k, v in sorted(trend["waku"].items(),   key=lambda x: -x[1]["count"])[:5]],
+            "hot_umaban": [{"val": k, "count": v["count"], "rate": v["rate"]} for k, v in sorted(trend["umaban"].items(), key=lambda x: -x[1]["count"])[:4]],
+            "hot_ninki":  [{"val": k, "count": v["count"], "rate": v["rate"]} for k, v in sorted(trend["ninki"].items(),  key=lambda x: -x[1]["count"])[:4]],
+            "hot_waku":   [{"val": k, "count": v["count"], "rate": v["rate"]} for k, v in sorted(trend["waku"].items(),   key=lambda x: -x[1]["count"])[:4]],
         })
     return jsonify({"date": today, "venues": venues_data})
 
