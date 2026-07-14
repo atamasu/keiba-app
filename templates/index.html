@@ -575,6 +575,7 @@ let currentFieldSize = null;
 let todayLiveInterval = null;
 let currentSummaryVenue = null;
 let currentTrendVenue = null;
+let currentSanrenpukuFieldSize = null;
 
 function showTab(name) {
   ['collect','predict','summary','sanrenpuku','analysis','races','history'].forEach(t => {
@@ -869,10 +870,9 @@ async function loadPredict() {
       : sortedPairs.filter(p => !p.bothFavorite || !hasOdds);
     const showPairs = filteredPairs.slice(0, 3);
 
-    // 予想ログ送信（ペア確定後）- リトライ付きで確実に記録
+    // 予想ログ送信用データ（DOMレンダリング後に送信）
     const top3umabans = byScore.slice(0,3).map(h => h.umaban);
     const logPairs = showPairs.map(p => [p.a.umaban, p.b.umaban]);
-    _sendPredictLog(venue, parseInt(race), top3umabans, anaPick?.umaban || '', logPairs);
 
     html += `<div style="margin-bottom:16px">
       <div style="font-size:14px;font-weight:700;color:#1e40af;margin-bottom:8px">
@@ -935,7 +935,7 @@ async function loadPredict() {
       // 軸: スコア1位、相手: 2〜4位 + 穴馬候補（重複除外）、最大4頭
       const jiku = byScore[0];
       const aitePool = byScore.slice(1, 4).filter(h => h.umaban !== jiku.umaban);
-      if (anaPick && !aitePool.find(h => h.umaban === anaPick.umaban)) aitePool.push(anaPick);
+      if (anaPick && !aitePool.find(h => String(h.umaban) === String(anaPick.umaban))) aitePool.push(anaPick);
       const aite = aitePool.slice(0, 4);
 
       if (jiku && aite.length >= 2) {
@@ -1053,6 +1053,7 @@ async function loadPredict() {
     });
     html += '</tbody></table></div></details></div>';
     area.innerHTML = html;
+    _sendPredictLog(venue, parseInt(race), top3umabans, anaPick?.umaban || '', logPairs);
   } catch(e) {
     area.innerHTML = `<p style="color:#ef4444">エラー: ${e.message}</p>`;
   }
@@ -2008,8 +2009,6 @@ function selectSanrenpukuPeriod(period, el) {
   el.classList.add('active');
   loadSanrenpuku();
 }
-
-let currentSanrenpukuFieldSize = null;
 
 function selectSanrenpukuFieldSize(size, el) {
   currentSanrenpukuFieldSize = size;
