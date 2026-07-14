@@ -1193,19 +1193,81 @@ def api_debug_files():
     return jsonify(result)
 
 
+def _calc_ninki_pair_stats(result_rows, field_size=None):
+    """result_rows から 3着以内に入った人気ペアの的中率を算出"""
+    from itertools import combinations as _comb
+    pair_count = defaultdict(int)
+    total = 0
+    for r in result_rows:
+        tc = _safe_int(r.get('頭数', 0))
+        if field_size == 'small' and tc > 8:
+            continue
+        if field_size == 'medium' and not (9 <= tc <= 12):
+            continue
+        if field_size == 'large' and tc < 13:
+            continue
+        nks = [_safe_int(r.get(f'人気{i}', 0)) for i in range(1, 4)]
+        nks = [n for n in nks if n]
+        if len(nks) < 2:
+            continue
+        total += 1
+        for a, b in _comb(sorted(nks), 2):
+            pair_count[f"{a}-{b}"] += 1
+    pairs = sorted(
+        [{"pair": k, "count": v, "rate": round(v / total * 100, 1) if total else 0}
+         for k, v in pair_count.items()],
+        key=lambda x: -x["count"]
+    )[:15]
+    return {"pairs": pairs, "total": total}
+
+
 @app.route("/api/fukusho")
 def api_fukusho():
     venue = request.args.get("venue")
     days = request.args.get("days", type=int)
     today_only = request.args.get("today") == "1"
     meetings = request.args.get("meetings", type=int)
+    field_size = request.args.get("field_size")  # small/medium/large
+
     rows = load_fukusho_data(venue=venue, days=days, today_only=today_only)
     if meetings:
         dates = sorted(set(r['日付'] for r in rows), reverse=True)[:meetings]
         rows = [r for r in rows if r['日付'] in set(dates)]
+
+    # 頭数フィルター：result.csvから(日付,競馬場,R)→頭数マップを作成
+    result_rows = load_sanrenpuku_data(venue=venue, days=days, today_only=today_only)
+    if meetings:
+        rdates = sorted(set(r['日付'] for r in result_rows), reverse=True)[:meetings]
+        result_rows = [r for r in result_rows if r['日付'] in set(rdates)]
+
+    if field_size:
+        # 頭数マップ生成
+        tc_map = {}
+        for r in result_rows:
+            tc_map[(r['日付'], r.get('競馬場', ''), r['R'])] = _safe_int(r.get('頭数', 0))
+        def _in_size(row):
+            tc = tc_map.get((row['日付'], row.get('競馬場', ''), row['R']), 0)
+            if field_size == 'small':  return tc > 0 and tc <= 8
+            if field_size == 'medium': return 9 <= tc <= 12
+            if field_size == 'large':  return tc >= 13
+            return True
+        rows = [r for r in rows if _in_size(r)]
+        result_rows = [r for r in result_rows if (
+            (field_size == 'small'  and _safe_int(r.get('頭数', 0)) <= 8  and _safe_int(r.get('頭数', 0)) > 0) or
+            (field_size == 'medium' and 9 <= _safe_int(r.get('頭数', 0)) <= 12) or
+            (field_size == 'large'  and _safe_int(r.get('頭数', 0)) >= 13)
+        )]
+
     fk = calc_fukusho_stats(rows)
     rec = recommend(fk["ninki"])
-    return jsonify({"stats": fk["ninki"], "waku": fk["waku"], "umaban": fk["umaban"], "total": fk["total"], "recommend": rec, "venue": venue or "全競馬場"})
+    ninki_pairs = _calc_ninki_pair_stats(result_rows, field_size=None)  # フィルター済みrows使用
+
+    return jsonify({
+        "stats": fk["ninki"], "waku": fk["waku"], "umaban": fk["umaban"],
+        "total": fk["total"], "recommend": rec,
+        "ninki_pairs": ninki_pairs["pairs"],
+        "venue": venue or "全競馬場",
+    })
 
 
 @app.route("/api/sanrenpuku")
