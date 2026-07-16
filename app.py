@@ -1193,26 +1193,47 @@ def api_debug_files():
     return jsonify(result)
 
 
-def _load_wide_pay_map(venue=None, days=None, today_only=False, meetings=None):
-    """ワイドCSV(venue.csv)から (日付,競馬場,R,'馬番a-馬番b') → 配当円 マップを返す"""
+_WIDE_EXCLUDE_SUFFIXES = ('_fukusho.csv', '_result.csv', '_sanrenpuku.csv')
+
+
+def _load_wide_pay_map(venue=None, days=None, today_only=False, date_set=None):
+    """ワイドCSV(venue.csv)から (日付,競馬場,R,'馬番a-馬番b') → 配当円 マップを返す。
+    date_set: 絞り込む日付集合(str)。指定時は days/today_only より優先。"""
     pay_map = {}
+    if not os.path.isdir(DATA_DIR):
+        return pay_map
+
     today_str = date.today().isoformat()
     cutoff = None
-    if today_only:
-        cutoff = today_str
-    elif days:
-        cutoff = (date.today() - timedelta(days=days - 1)).isoformat()
+    if date_set is None:
+        if today_only:
+            cutoff = today_str
+        elif days:
+            cutoff = (date.today() - timedelta(days=days - 1)).isoformat()
 
-    for d_entry in sorted(os.listdir(DATA_DIR)):
+    try:
+        entries = sorted(os.listdir(DATA_DIR))
+    except OSError:
+        return pay_map
+
+    for d_entry in entries:
         d_path = os.path.join(DATA_DIR, d_entry)
         if not re.match(r'^\d{4}-\d{2}-\d{2}$', d_entry) or not os.path.isdir(d_path):
             continue
-        if today_only and d_entry != today_str:
+        if date_set is not None:
+            if d_entry not in date_set:
+                continue
+        else:
+            if today_only and d_entry != today_str:
+                continue
+            if cutoff and not today_only and d_entry < cutoff:
+                continue
+        try:
+            fnames = os.listdir(d_path)
+        except OSError:
             continue
-        if cutoff and not today_only and d_entry < cutoff:
-            continue
-        for fname in os.listdir(d_path):
-            if fname.endswith('_fukusho.csv') or fname.endswith('_result.csv') or not fname.endswith('.csv'):
+        for fname in fnames:
+            if not fname.endswith('.csv') or fname.endswith(_WIDE_EXCLUDE_SUFFIXES):
                 continue
             v = fname[:-4]  # venue name without .csv
             if venue and v != venue:
@@ -1231,11 +1252,6 @@ def _load_wide_pay_map(venue=None, days=None, today_only=False, meetings=None):
                             pay_map[(d_entry, v, r_val, f"{nums[0]}-{nums[1]}")] = pay
             except Exception:
                 pass
-
-    if meetings:
-        all_dates = sorted(set(k[0] for k in pay_map), reverse=True)[:meetings]
-        date_set = set(all_dates)
-        pay_map = {k: v for k, v in pay_map.items() if k[0] in date_set}
 
     return pay_map
 
@@ -1350,12 +1366,14 @@ def api_fukusho():
 
     fk = calc_fukusho_stats(rows)
     rec = recommend(fk["ninki"])
-    wide_pay_map = _load_wide_pay_map(venue=venue, days=days, today_only=today_only, meetings=meetings)
+    # result_rows と同じ日付ウィンドウでワイド配当を読み込む（meetings日付ズレ防止）
+    result_date_set = set(r.get('日付', '') for r in result_rows) if result_rows else None
+    wide_pay_map = _load_wide_pay_map(venue=venue, days=days, today_only=today_only,
+                                      date_set=result_date_set if meetings else None)
     ninki_pairs = _calc_ninki_pair_stats(result_rows, wide_pay_map=wide_pay_map)
 
-    # 頭数フィルター別のレース数内訳（未フィルター時も参考として返す）
-    result_rows_all = load_sanrenpuku_data(venue=venue, days=days, today_only=today_only, meetings=meetings) \
-        if not field_size else load_sanrenpuku_data(venue=venue, days=days, today_only=today_only)
+    # 頭数フィルター別のレース数内訳（常にmeetingsを引き渡す）
+    result_rows_all = load_sanrenpuku_data(venue=venue, days=days, today_only=today_only, meetings=meetings)
     field_size_counts = {"small": 0, "medium": 0, "large": 0}
     for r in result_rows_all:
         tc = _safe_int(r.get('頭数', 0))

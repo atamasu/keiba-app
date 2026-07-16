@@ -2158,8 +2158,9 @@ async function loadSanrenpuku() {
       const avgPayStr  = p.avg_pay  ? `${p.avg_pay.toLocaleString()}円` : '-';
       const avgRateStr = p.avg_rate ? `${p.avg_rate}倍` : '-';
       // 期待値 = 的中率% × 平均倍率 / 100
-      const ev = (p.avg_rate && p.rate) ? (p.rate / 100 * p.avg_rate).toFixed(2) : null;
-      const evColor = ev >= 1.0 ? '#16a34a' : ev >= 0.7 ? '#d97706' : '#ef4444';
+      const evNum = (p.avg_rate && p.rate) ? p.rate / 100 * p.avg_rate : null;
+      const ev = evNum !== null ? evNum.toFixed(2) : null;
+      const evColor = evNum >= 1.0 ? '#16a34a' : evNum >= 0.7 ? '#d97706' : '#ef4444';
       html += `<tr style="border-top:1px solid #f1f5f9${i===0?';background:#fefce8':''}">
         <td style="padding:8px 6px"><span style="font-size:13px;color:#6b7280;margin-right:4px">${medals[i]||''}</span>${badge(a)}×${badge(b)}${oddsTag}</td>
         <td style="padding:8px 6px;text-align:right;color:#1d4ed8;font-weight:700">${p.rate}%<br><span style="font-size:11px;font-weight:400;color:#6b7280">${p.count}件</span></td>
