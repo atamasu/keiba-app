@@ -1279,11 +1279,23 @@ def api_fukusho():
     rec = recommend(fk["ninki"])
     ninki_pairs = _calc_ninki_pair_stats(result_rows)  # フィルター済みなのでfield_size不要
 
+    # 頭数フィルター別のレース数内訳（未フィルター時も参考として返す）
+    result_rows_all = load_sanrenpuku_data(venue=venue, days=days, today_only=today_only, meetings=meetings) \
+        if not field_size else load_sanrenpuku_data(venue=venue, days=days, today_only=today_only)
+    field_size_counts = {"small": 0, "medium": 0, "large": 0}
+    for r in result_rows_all:
+        tc = _safe_int(r.get('頭数', 0))
+        if 0 < tc <= 8:   field_size_counts["small"]  += 1
+        elif 9 <= tc <= 12: field_size_counts["medium"] += 1
+        elif tc >= 13:      field_size_counts["large"]  += 1
+
     return jsonify({
         "stats": fk["ninki"], "waku": fk["waku"], "umaban": fk["umaban"],
         "total": fk["total"], "recommend": rec,
         "ninki_pairs": ninki_pairs["pairs"],
         "venue": venue or "全競馬場",
+        "field_size_counts": field_size_counts,
+        "filtered_result_total": len(result_rows),
     })
 
 

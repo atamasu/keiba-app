@@ -521,11 +521,12 @@
       <div style="height:12px"></div>
       <div style="font-size:12px;color:#64748b;margin-bottom:6px">頭数で絞り込む</div>
       <div class="filter-row" id="sanrenpuku-fieldsize-bar">
-        <div class="filter-btn active" onclick="selectSanrenpukuFieldSize(null, this)">全頭数</div>
-        <div class="filter-btn" onclick="selectSanrenpukuFieldSize('small', this)">〜8頭</div>
-        <div class="filter-btn" onclick="selectSanrenpukuFieldSize('medium', this)">9〜12頭</div>
-        <div class="filter-btn" onclick="selectSanrenpukuFieldSize('large', this)">13頭〜</div>
+        <div class="filter-btn active" id="fsz-btn-all"    onclick="selectSanrenpukuFieldSize(null, this)">全頭数</div>
+        <div class="filter-btn"        id="fsz-btn-small"  onclick="selectSanrenpukuFieldSize('small', this)">〜8頭</div>
+        <div class="filter-btn"        id="fsz-btn-medium" onclick="selectSanrenpukuFieldSize('medium', this)">9〜12頭</div>
+        <div class="filter-btn"        id="fsz-btn-large"  onclick="selectSanrenpukuFieldSize('large', this)">13頭〜</div>
       </div>
+      <div id="sanrenpuku-fieldsize-note" style="font-size:11px;color:#64748b;margin-top:4px;min-height:16px"></div>
     </div>
     <div id="sanrenpuku-area"><div class="loading-center">読み込み中...</div></div>
   </div>
@@ -2028,6 +2029,32 @@ async function loadSanrenpuku() {
   if (currentSanrenpukuFieldSize) params.set('field_size', currentSanrenpukuFieldSize);
 
   const fk = await fetch(API+'/api/fukusho?'+params).then(r=>r.json()).catch(()=>null);
+
+  // フィルターボタンに件数バッジを反映
+  const fsCounts = fk?.field_size_counts || {};
+  const totalCount = (fsCounts.small||0) + (fsCounts.medium||0) + (fsCounts.large||0);
+  const btnAll    = document.getElementById('fsz-btn-all');
+  const btnSmall  = document.getElementById('fsz-btn-small');
+  const btnMedium = document.getElementById('fsz-btn-medium');
+  const btnLarge  = document.getElementById('fsz-btn-large');
+  if (btnAll)    btnAll.innerHTML    = `全頭数<span style="font-size:10px;opacity:.7;margin-left:3px">(${totalCount})</span>`;
+  if (btnSmall)  btnSmall.innerHTML  = `〜8頭<span style="font-size:10px;opacity:.7;margin-left:3px">(${fsCounts.small||0})</span>`;
+  if (btnMedium) btnMedium.innerHTML = `9〜12頭<span style="font-size:10px;opacity:.7;margin-left:3px">(${fsCounts.medium||0})</span>`;
+  if (btnLarge)  btnLarge.innerHTML  = `13頭〜<span style="font-size:10px;opacity:.7;margin-left:3px">(${fsCounts.large||0})</span>`;
+
+  // フィルター中の件数注記
+  const noteEl = document.getElementById('sanrenpuku-fieldsize-note');
+  if (noteEl) {
+    const filteredTotal = fk?.filtered_result_total ?? fk?.total ?? 0;
+    if (currentSanrenpukuFieldSize) {
+      const labelMap = {small:'〜8頭', medium:'9〜12頭', large:'13頭〜'};
+      const warn = filteredTotal < 10 ? ' ⚠️ データ少・参考程度' : '';
+      noteEl.textContent = `${labelMap[currentSanrenpukuFieldSize]} フィルター中：${filteredTotal}レース対象${warn}`;
+      noteEl.style.color = filteredTotal < 10 ? '#d97706' : '#64748b';
+    } else {
+      noteEl.textContent = '';
+    }
+  }
 
   const WAKU_BG2  = ['','#f3f4f6','#1f2937','#fee2e2','#dbeafe','#fef9c3','#dcfce7','#ffedd5','#fce7f3'];
   const WAKU_TEXT = ['','#111','#fff','#fff','#fff','#000','#fff','#fff','#fff'];
