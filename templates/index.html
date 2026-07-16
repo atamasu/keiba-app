@@ -2156,6 +2156,43 @@ async function loadHitRate() {
       </div>
       <div style="font-size:11px;color:#6b7280;margin-bottom:10px">ワイド: 上位3頭から2頭以上が3着以内 ／ 穴馬: 候補が3着以内</div>`;
 
+    // ペア vs おすすめ3頭 比較カード
+    const pairSummary = d.pair_summary || [];
+    if (pairSummary.length > 0 || d.total > 0) {
+      const top3Rate = d.hit_rate;
+      const top3Color = top3Rate >= 40 ? '#16a34a' : top3Rate >= 25 ? '#d97706' : '#ef4444';
+      let compRows = `
+        <div style="display:flex;align-items:center;justify-content:space-between;padding:8px 0;border-bottom:1px solid #f1f5f9">
+          <span style="font-size:13px;font-weight:700">⭐ おすすめ3頭<br><span style="font-size:10px;font-weight:400;color:#6b7280">（2頭以上3着内）</span></span>
+          <span style="font-size:22px;font-weight:700;color:${top3Color}">${top3Rate !== null ? top3Rate+'%' : '-'}</span>
+          <span style="font-size:12px;color:#6b7280">${d.hit}/${d.total}件</span>
+        </div>`;
+      pairSummary.forEach(p => {
+        const pColor = p.rate >= 40 ? '#16a34a' : p.rate >= 25 ? '#d97706' : '#ef4444';
+        const label = p.no === 1 ? '本命ペア' : p.no === 2 ? '対抗ペア' : '穴ペア';
+        compRows += `
+        <div style="display:flex;align-items:center;justify-content:space-between;padding:8px 0;border-bottom:1px solid #f1f5f9">
+          <span style="font-size:13px;font-weight:700">🔗 推奨ペア${p.no}（${label}）<br><span style="font-size:10px;font-weight:400;color:#6b7280">（2頭とも3着内）</span></span>
+          <span style="font-size:22px;font-weight:700;color:${p.rate !== null ? pColor : '#9ca3af'}">${p.rate !== null ? p.rate+'%' : '-'}</span>
+          <span style="font-size:12px;color:#6b7280">${p.hit}/${p.total}件</span>
+        </div>`;
+      });
+      // 最も高い的中率を強調
+      const allRates = [
+        {label: 'おすすめ3頭', rate: top3Rate},
+        ...pairSummary.map(p => ({label: `推奨ペア${p.no}`, rate: p.rate}))
+      ].filter(x => x.rate !== null);
+      const best = allRates.sort((a,b) => b.rate - a.rate)[0];
+      const adviceText = best
+        ? `📊 データ上は <strong>${best.label}</strong> が的中率 <strong>${best.rate}%</strong> で最も高いです`
+        : '';
+      html += `<div style="background:#fff;border:1.5px solid #e2e8f0;border-radius:12px;padding:12px 14px;margin-bottom:16px">
+        <div style="font-size:13px;font-weight:700;color:#1e293b;margin-bottom:8px">📊 買い方比較（データ実績）</div>
+        ${compRows}
+        ${adviceText ? `<div style="font-size:12px;color:#1e40af;margin-top:10px;padding:8px;background:#eff6ff;border-radius:8px">${adviceText}</div>` : ''}
+      </div>`
+    }
+
     // 直近10件の予想履歴
     const recent = d.records.filter(r => r.actual !== null).slice(0, 10);
     if (recent.length > 0) {

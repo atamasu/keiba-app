@@ -1240,27 +1240,44 @@ def api_fukusho():
         rdates = sorted(set(r['日付'] for r in result_rows), reverse=True)[:meetings]
         result_rows = [r for r in result_rows if r['日付'] in set(rdates)]
 
+    # meetings の日付ウィンドウを fukusho/result で共有する
+    if meetings:
+        shared_dates = sorted(
+            set(r.get('日付', '') for r in rows) & set(r.get('日付', '') for r in result_rows),
+            reverse=True
+        )[:meetings]
+        if not shared_dates:
+            # どちらかしかない場合は広い方を使う
+            shared_dates = sorted(
+                set(r.get('日付', '') for r in rows) | set(r.get('日付', '') for r in result_rows),
+                reverse=True
+            )[:meetings]
+        rows = [r for r in rows if r.get('日付', '') in set(shared_dates)]
+        result_rows = [r for r in result_rows if r.get('日付', '') in set(shared_dates)]
+
     if field_size:
-        # 頭数マップ生成
+        # 頭数マップ生成（KeyError回避のため .get() 使用）
         tc_map = {}
         for r in result_rows:
-            tc_map[(r['日付'], r.get('競馬場', ''), r['R'])] = _safe_int(r.get('頭数', 0))
-        def _in_size(row):
-            tc = tc_map.get((row['日付'], row.get('競馬場', ''), row['R']), 0)
-            if field_size == 'small':  return tc > 0 and tc <= 8
+            key = (r.get('日付', ''), r.get('競馬場', ''), r.get('R', ''))
+            tc_map[key] = _safe_int(r.get('頭数', 0))
+
+        def _tc_in_size(tc):
+            if field_size == 'small':  return 0 < tc <= 8
             if field_size == 'medium': return 9 <= tc <= 12
             if field_size == 'large':  return tc >= 13
             return True
+
+        def _in_size(row):
+            tc = tc_map.get((row.get('日付', ''), row.get('競馬場', ''), row.get('R', '')), 0)
+            return _tc_in_size(tc)
+
         rows = [r for r in rows if _in_size(r)]
-        result_rows = [r for r in result_rows if (
-            (field_size == 'small'  and _safe_int(r.get('頭数', 0)) <= 8  and _safe_int(r.get('頭数', 0)) > 0) or
-            (field_size == 'medium' and 9 <= _safe_int(r.get('頭数', 0)) <= 12) or
-            (field_size == 'large'  and _safe_int(r.get('頭数', 0)) >= 13)
-        )]
+        result_rows = [r for r in result_rows if _tc_in_size(_safe_int(r.get('頭数', 0)))]
 
     fk = calc_fukusho_stats(rows)
     rec = recommend(fk["ninki"])
-    ninki_pairs = _calc_ninki_pair_stats(result_rows, field_size=None)  # フィルター済みrows使用
+    ninki_pairs = _calc_ninki_pair_stats(result_rows)  # フィルター済みなのでfield_size不要
 
     return jsonify({
         "stats": fk["ninki"], "waku": fk["waku"], "umaban": fk["umaban"],
@@ -1795,7 +1812,29 @@ def api_predict_results():
             })
 
     hit_rate = round(hit / total * 100) if total > 0 else None
-    return jsonify({"records": records, "hit_rate": hit_rate, "total": total, "hit": hit})
+
+    # ペア別集計
+    pair_stats = {}  # pair_no (1-3) → {total, hit}
+    for rec in records:
+        for ph in rec.get("pair_hits", []):
+            no = ph["no"]
+            if no not in pair_stats:
+                pair_stats[no] = {"total": 0, "hit": 0}
+            pair_stats[no]["total"] += 1
+            if ph["hit"]:
+                pair_stats[no]["hit"] += 1
+    pair_summary = []
+    for no in sorted(pair_stats):
+        s = pair_stats[no]
+        pair_summary.append({
+            "no": no,
+            "total": s["total"],
+            "hit": s["hit"],
+            "rate": round(s["hit"] / s["total"] * 100) if s["total"] > 0 else None,
+        })
+
+    return jsonify({"records": records, "hit_rate": hit_rate, "total": total, "hit": hit,
+                    "pair_summary": pair_summary})
 
 
 def start_scheduler():
