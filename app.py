@@ -1193,10 +1193,59 @@ def api_debug_files():
     return jsonify(result)
 
 
-def _calc_ninki_pair_stats(result_rows, field_size=None):
-    """result_rows から 3着以内に入った人気ペアの的中率を算出"""
+def _load_wide_pay_map(venue=None, days=None, today_only=False, meetings=None):
+    """ワイドCSV(venue.csv)から (日付,競馬場,R,'馬番a-馬番b') → 配当円 マップを返す"""
+    pay_map = {}
+    today_str = date.today().isoformat()
+    cutoff = None
+    if today_only:
+        cutoff = today_str
+    elif days:
+        cutoff = (date.today() - timedelta(days=days - 1)).isoformat()
+
+    for d_entry in sorted(os.listdir(DATA_DIR)):
+        d_path = os.path.join(DATA_DIR, d_entry)
+        if not re.match(r'^\d{4}-\d{2}-\d{2}$', d_entry) or not os.path.isdir(d_path):
+            continue
+        if today_only and d_entry != today_str:
+            continue
+        if cutoff and not today_only and d_entry < cutoff:
+            continue
+        for fname in os.listdir(d_path):
+            if fname.endswith('_fukusho.csv') or fname.endswith('_result.csv') or not fname.endswith('.csv'):
+                continue
+            v = fname[:-4]  # venue name without .csv
+            if venue and v != venue:
+                continue
+            fpath = os.path.join(d_path, fname)
+            try:
+                with open(fpath, encoding='utf-8') as f:
+                    for row in csv.DictReader(f):
+                        combo = row.get('組み合わせ', '').strip()
+                        nums = sorted(re.findall(r'\d+', combo), key=int)
+                        if len(nums) != 2:
+                            continue
+                        r_val = row.get('R', '')
+                        pay = _safe_int(row.get('配当円', 0))
+                        if pay > 0:
+                            pay_map[(d_entry, v, r_val, f"{nums[0]}-{nums[1]}")] = pay
+            except Exception:
+                pass
+
+    if meetings:
+        all_dates = sorted(set(k[0] for k in pay_map), reverse=True)[:meetings]
+        date_set = set(all_dates)
+        pay_map = {k: v for k, v in pay_map.items() if k[0] in date_set}
+
+    return pay_map
+
+
+def _calc_ninki_pair_stats(result_rows, wide_pay_map=None, field_size=None):
+    """result_rows から 3着以内に入った人気ペアの的中率と平均配当を算出"""
     from itertools import combinations as _comb
     pair_count = defaultdict(int)
+    pair_pay_sum = defaultdict(int)
+    pair_pay_count = defaultdict(int)
     total = 0
     for r in result_rows:
         tc = _safe_int(r.get('頭数', 0))
@@ -1211,10 +1260,34 @@ def _calc_ninki_pair_stats(result_rows, field_size=None):
         if len(nks) < 2:
             continue
         total += 1
+        # 人気→馬番マップ（ワイド配当の逆引き用）
+        nk_to_uma = {}
+        for i in range(1, 4):
+            nk = _safe_int(r.get(f'人気{i}', 0))
+            uma = str(r.get(f'馬番{i}', '')).strip()
+            if nk and uma:
+                nk_to_uma[nk] = uma
+        d_key = r.get('日付', '')
+        v_key = r.get('競馬場', '')
+        race_key = r.get('R', '')
         for a, b in _comb(sorted(nks), 2):
-            pair_count[f"{a}-{b}"] += 1
+            pk = f"{a}-{b}"
+            pair_count[pk] += 1
+            # ワイド配当を逆引き
+            if wide_pay_map:
+                ua = nk_to_uma.get(a, '')
+                ub = nk_to_uma.get(b, '')
+                if ua and ub:
+                    sorted_uma = sorted([ua, ub], key=lambda x: int(x) if str(x).isdigit() else 99)
+                    wkey = (d_key, v_key, race_key, f"{sorted_uma[0]}-{sorted_uma[1]}")
+                    pay = wide_pay_map.get(wkey, 0)
+                    if pay > 0:
+                        pair_pay_sum[pk] += pay
+                        pair_pay_count[pk] += 1
     pairs = sorted(
-        [{"pair": k, "count": v, "rate": round(v / total * 100, 1) if total else 0}
+        [{"pair": k, "count": v, "rate": round(v / total * 100, 1) if total else 0,
+          "avg_pay": round(pair_pay_sum[k] / pair_pay_count[k]) if pair_pay_count[k] else None,
+          "avg_rate": round(pair_pay_sum[k] / pair_pay_count[k] / 100, 1) if pair_pay_count[k] else None}
          for k, v in pair_count.items()],
         key=lambda x: -x["count"]
     )[:15]
@@ -1277,7 +1350,8 @@ def api_fukusho():
 
     fk = calc_fukusho_stats(rows)
     rec = recommend(fk["ninki"])
-    ninki_pairs = _calc_ninki_pair_stats(result_rows)  # フィルター済みなのでfield_size不要
+    wide_pay_map = _load_wide_pay_map(venue=venue, days=days, today_only=today_only, meetings=meetings)
+    ninki_pairs = _calc_ninki_pair_stats(result_rows, wide_pay_map=wide_pay_map)
 
     # 頭数フィルター別のレース数内訳（未フィルター時も参考として返す）
     result_rows_all = load_sanrenpuku_data(venue=venue, days=days, today_only=today_only, meetings=meetings) \

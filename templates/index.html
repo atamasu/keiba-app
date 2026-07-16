@@ -915,11 +915,26 @@ async function loadPredict() {
         if (a.umaban_rate > 30 || b.umaban_rate > 30) reasons.push(`馬番の入着率が高い`);
         const reasonText = reasons.length ? reasons.join('・') : `スコア上位の組み合わせ`;
 
+        // 人気合計から期待倍率帯を判定
+        const nkA = parseInt(a.ninki) || 0;
+        const nkB = parseInt(b.ninki) || 0;
+        const nkSum = nkA + nkB;
+        let oddsZone, oddsZoneColor, oddsZoneBg;
+        if (!nkA || !nkB)       { oddsZone = null; }
+        else if (nkSum <= 4)    { oddsZone = '低配当ゾーン';  oddsZoneColor = '#6b7280'; oddsZoneBg = '#f3f4f6'; }
+        else if (nkSum <= 7)    { oddsZone = '中配当ゾーン';  oddsZoneColor = '#92400e'; oddsZoneBg = '#fef3c7'; }
+        else if (nkSum <= 11)   { oddsZone = '高配当ゾーン';  oddsZoneColor = '#166534'; oddsZoneBg = '#dcfce7'; }
+        else                    { oddsZone = '大穴ゾーン';    oddsZoneColor = '#7c2d12'; oddsZoneBg = '#ffedd5'; }
+        const oddsZoneTag = oddsZone
+          ? `<span style="font-size:11px;font-weight:700;color:${oddsZoneColor};background:${oddsZoneBg};border-radius:6px;padding:2px 8px">${oddsZone}（人気計${nkSum}）</span>`
+          : '';
+
         html += `<div style="background:${pairBgs[pi]};border:1.5px solid ${pairColors[pi]}33;border-radius:12px;padding:14px;margin-bottom:10px">
-          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">
+          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px">
             <span style="font-size:13px;font-weight:700;color:${pairColors[pi]}">ペア ${pi+1}</span>
             ${wideLabel}
           </div>
+          ${oddsZoneTag ? `<div style="margin-bottom:8px">${oddsZoneTag}</div>` : ''}
           ${horseChip(a)}
           <div style="text-align:center;font-size:12px;color:#6b7280;margin:2px 0">× ワイド ×</div>
           ${horseChip(b)}
@@ -2121,28 +2136,39 @@ async function loadSanrenpuku() {
     html += '</table></div>';
   }
 
-  // ワイド 人気ペア 的中率
+  // ワイド 人気ペア 的中頻度＋平均配当
   if (fk && fk.ninki_pairs && fk.ninki_pairs.length) {
     const medals = ['🥇','🥈','🥉','4位','5位','6位','7位','8位','9位','10位'];
+    const hasAvgPay = fk.ninki_pairs.some(p => p.avg_pay);
     html += `<div class="card">
       <h2>🎯 ワイド 人気ペア 的中頻度 <span style="font-size:12px;color:#64748b;font-weight:normal">(${fk.venue} / ${fk.total || ''}レース)</span></h2>
       <p style="font-size:12px;color:#64748b;margin:0 0 10px">3着以内に同時に入った人気の組み合わせ（よく当たるペア順）</p>
       <table style="width:100%;border-collapse:collapse;font-size:14px">
         <tr style="background:#f8fafc;font-size:12px;color:#64748b">
           <th style="padding:8px 6px;text-align:left">人気ペア</th>
-          <th style="padding:8px 6px;text-align:right">件数</th>
-          <th style="padding:8px 6px;text-align:right">出現率</th>
+          <th style="padding:8px 6px;text-align:right">的中率</th>
+          ${hasAvgPay ? '<th style="padding:8px 6px;text-align:right">平均配当</th><th style="padding:8px 6px;text-align:right">期待値</th>' : ''}
         </tr>`;
     fk.ninki_pairs.slice(0, 10).forEach((p, i) => {
       const [a, b] = p.pair.split('-');
+      const nkSum = parseInt(a) + parseInt(b);
       const badge = (n) => `<span style="display:inline-block;background:#1d4ed8;color:#fff;border-radius:12px;padding:1px 8px;font-size:12px;font-weight:700;margin:0 2px">${n}人気</span>`;
+      const oddsLabel = nkSum <= 4 ? {text:'低配当', col:'#9ca3af'} : nkSum <= 7 ? {text:'中配当', col:'#d97706'} : {text:'高配当', col:'#16a34a'};
+      const oddsTag = `<span style="font-size:10px;color:${oddsLabel.col};border:1px solid ${oddsLabel.col};border-radius:4px;padding:0 4px;margin-left:4px">${oddsLabel.text}</span>`;
+      const avgPayStr  = p.avg_pay  ? `${p.avg_pay.toLocaleString()}円` : '-';
+      const avgRateStr = p.avg_rate ? `${p.avg_rate}倍` : '-';
+      // 期待値 = 的中率% × 平均倍率 / 100
+      const ev = (p.avg_rate && p.rate) ? (p.rate / 100 * p.avg_rate).toFixed(2) : null;
+      const evColor = ev >= 1.0 ? '#16a34a' : ev >= 0.7 ? '#d97706' : '#ef4444';
       html += `<tr style="border-top:1px solid #f1f5f9${i===0?';background:#fefce8':''}">
-        <td style="padding:8px 6px"><span style="font-size:13px;color:#6b7280;margin-right:4px">${medals[i]||''}</span>${badge(a)}×${badge(b)}</td>
-        <td style="padding:8px 6px;text-align:right;font-weight:700">${p.count}件</td>
-        <td style="padding:8px 6px;text-align:right;color:#1d4ed8;font-weight:700">${p.rate}%</td>
+        <td style="padding:8px 6px"><span style="font-size:13px;color:#6b7280;margin-right:4px">${medals[i]||''}</span>${badge(a)}×${badge(b)}${oddsTag}</td>
+        <td style="padding:8px 6px;text-align:right;color:#1d4ed8;font-weight:700">${p.rate}%<br><span style="font-size:11px;font-weight:400;color:#6b7280">${p.count}件</span></td>
+        ${hasAvgPay ? `<td style="padding:8px 6px;text-align:right">${avgPayStr}<br><span style="font-size:11px;color:#6b7280">${avgRateStr}</span></td><td style="padding:8px 6px;text-align:right;font-weight:700;color:${ev ? evColor : '#9ca3af'}">${ev ? ev+'×' : '-'}</td>` : ''}
       </tr>`;
     });
-    html += '</table></div>';
+    html += '</table>';
+    if (hasAvgPay) html += `<p style="font-size:11px;color:#64748b;margin:8px 0 0">期待値 = 的中率×平均倍率。1.0以上が理論上プラス収支の目安</p>`;
+    html += '</div>';
   }
 
   area.innerHTML = html || '<div class="card"><p style="color:#9ca3af;text-align:center">データなし</p></div>';
