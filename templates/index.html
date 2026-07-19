@@ -762,8 +762,17 @@ async function loadPredict() {
           <strong>${u}番</strong><span style="color:#6b7280">${r}%</span>
         </span>`;
       }).join('');
-      const wakuSection = wakuItems ? `<div style="margin-bottom:6px;font-size:12px;color:#374151">🔲 入着枠（上位3）</div><div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:10px">${wakuItems}</div>` : '';
-      const umaSection  = umaItems  ? `<div style="margin-bottom:6px;font-size:12px;color:#374151">🐴 入着馬番（上位3）</div><div style="display:flex;gap:6px;flex-wrap:wrap">${umaItems}</div>` : '';
+      const hjockey = tt.hot_jockey || [];
+      const jkItems = hjockey.map(j => {
+        const r = (tt.jockey && tt.jockey[j]) ? tt.jockey[j].rate : 0;
+        const jkColor = r >= 50 ? '#166534' : r >= 33 ? '#92400e' : '#374151';
+        return `<span style="display:inline-flex;align-items:center;gap:4px;background:#f3f4f6;border-radius:20px;padding:4px 10px;font-size:13px">
+          <span>🏇</span><strong style="color:${jkColor}">${j}</strong><span style="color:#6b7280;font-size:11px">${r}%</span>
+        </span>`;
+      }).join('');
+      const wakuSection   = wakuItems ? `<div style="margin-bottom:6px;font-size:12px;color:#374151">🔲 入着枠（上位3）</div><div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:10px">${wakuItems}</div>` : '';
+      const umaSection    = umaItems  ? `<div style="margin-bottom:6px;font-size:12px;color:#374151">🐴 入着馬番（上位3）</div><div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:10px">${umaItems}</div>` : '';
+      const jockeySection = jkItems   ? `<div style="margin-bottom:6px;font-size:12px;color:#374151">🏇 入着騎手（上位4）</div><div style="display:flex;gap:6px;flex-wrap:wrap">${jkItems}</div>` : '';
       // 信頼度バー（完了レース数に応じて0→100%）
       const reliability = Math.min(tt.completed_races / 5, 1.0);
       const reliabilityPct = Math.round(reliability * 100);
@@ -781,7 +790,7 @@ async function loadPredict() {
         </div>`;
       html += `<div style="background:#ecfdf5;border:1px solid #6ee7b7;border-radius:10px;padding:12px 14px;margin-bottom:14px">
         <div style="font-size:13px;font-weight:700;color:#065f46;margin-bottom:8px">📊 今日の傾向（${venue} ／ 完了${tt.completed_races}R）</div>
-        ${wakuSection}${umaSection}${reliabilityBar}
+        ${wakuSection}${umaSection}${jockeySection}${reliabilityBar}
       </div>`;
     } else {
       html += `<div style="background:#f3f4f6;border-radius:10px;padding:10px 14px;font-size:13px;color:#6b7280;margin-bottom:14px">
@@ -1997,7 +2006,8 @@ async function loadTodayLive() {
         <div style="font-weight:700;font-size:13px;margin-bottom:4px">🏟 ${v.venue} <span style="font-size:11px;color:#16a34a;font-weight:400">${v.completed_races}R完了</span></div>
         <div style="margin-bottom:3px"><span style="font-size:10px;color:#64748b">🐴 熱い馬番：</span>${umaChips||'-'}</div>
         <div style="margin-bottom:3px"><span style="font-size:10px;color:#64748b">🎯 熱い人気：</span>${nkChips||'-'}</div>
-        <div><span style="font-size:10px;color:#64748b">🎨 熱い枠色：</span>${wkChips||'-'}</div>
+        <div style="margin-bottom:3px"><span style="font-size:10px;color:#64748b">🎨 熱い枠色：</span>${wkChips||'-'}</div>
+        ${(v.hot_jockey||[]).length ? `<div><span style="font-size:10px;color:#64748b">🏇 熱い騎手：</span>${(v.hot_jockey||[]).map(j=>`<span style="display:inline-block;background:#7c3aed;color:#fff;border-radius:5px;padding:2px 8px;margin:2px;font-size:11px;font-weight:700">${j.val} ${j.count}/${v.completed_races}R(${j.rate}%)</span>`).join('')}</div>` : ''}
       </div>`;
     }).join('');
 }

@@ -1134,23 +1134,28 @@ def _calc_today_trend(venue_name):
         um_count = defaultdict(int)
         nk_count = defaultdict(int)
         wk_count = defaultdict(int)
+        jk_count = defaultdict(int)
         total = len(rows)
         for row in rows:
             for i in range(1, 4):
                 ub = row.get(f"馬番{i}", "")
                 nk = row.get(f"人気{i}", "")
                 wkv = row.get(f"枠{i}", "")
+                jkv = row.get(f"騎手{i}", "").strip()
                 if ub: um_count[ub] += 1
                 if nk: nk_count[nk] += 1
                 if wkv: wk_count[wkv] += 1
+                if jkv: jk_count[jkv] += 1
         return {
             "completed_races": total,
-            "waku": {k: {"count": c, "rate": round(c / total * 100)} for k, c in wk_count.items()},
+            "waku":   {k: {"count": c, "rate": round(c / total * 100)} for k, c in wk_count.items()},
             "umaban": {k: {"count": c, "rate": round(c / total * 100)} for k, c in um_count.items()},
-            "ninki": {k: {"count": c, "rate": round(c / total * 100)} for k, c in nk_count.items()},
+            "ninki":  {k: {"count": c, "rate": round(c / total * 100)} for k, c in nk_count.items()},
+            "jockey": {k: {"count": c, "rate": round(c / total * 100)} for k, c in jk_count.items()},
             "hot_waku":   sorted(wk_count.keys(), key=lambda x: -wk_count[x])[:3],
             "hot_umaban": sorted(um_count.keys(), key=lambda x: -um_count[x])[:3],
             "hot_ninki":  sorted(nk_count.keys(), key=lambda x: -nk_count[x])[:3],
+            "hot_jockey": sorted(jk_count.keys(), key=lambda x: -jk_count[x])[:4],
         }
     except Exception:
         return None
@@ -1172,6 +1177,7 @@ def api_today_live():
             "hot_umaban": [{"val": k, "count": v["count"], "rate": v["rate"]} for k, v in sorted(trend["umaban"].items(), key=lambda x: -x[1]["count"])[:4]],
             "hot_ninki":  [{"val": k, "count": v["count"], "rate": v["rate"]} for k, v in sorted(trend["ninki"].items(),  key=lambda x: -x[1]["count"])[:4]],
             "hot_waku":   [{"val": k, "count": v["count"], "rate": v["rate"]} for k, v in sorted(trend["waku"].items(),   key=lambda x: -x[1]["count"])[:4]],
+            "hot_jockey": [{"val": k, "count": v["count"], "rate": v["rate"]} for k, v in sorted(trend["jockey"].items(), key=lambda x: -x[1]["count"])[:4]] if trend.get("jockey") else [],
         })
     return jsonify({"date": today, "venues": venues_data})
 
