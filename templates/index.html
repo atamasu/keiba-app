@@ -805,12 +805,18 @@ async function loadPredict() {
         const trendTag = h.trend_bonus > 0
           ? `<span style="font-size:10px;background:#fef9c3;color:#92400e;border-radius:4px;padding:1px 5px;margin-left:4px">今日の流れ+${h.trend_bonus}</span>`
           : '';
+        const jkName = h.jockey || '';
+        const jkRate = h.jockey_rate !== null && h.jockey_rate !== undefined ? h.jockey_rate : null;
+        const jkColor = jkRate >= 35 ? '#16a34a' : jkRate >= 20 ? '#d97706' : '#6b7280';
+        const jkTag = jkName
+          ? `<span style="font-size:10px;color:${jkColor};margin-left:4px">🏇${jkName}${jkRate !== null ? `(${jkRate}%)` : ''}</span>`
+          : '';
         return `<div style="display:flex;align-items:center;gap:10px;padding:8px 10px;background:${rankBg[idx]};border:1px solid ${rankBorder[idx]};border-radius:10px;margin-bottom:6px">
           <div style="font-size:11px;font-weight:700;color:${rankColors[idx]};min-width:24px;text-align:center">${rankLabels[idx]}</div>
           <span style="width:30px;height:30px;border-radius:50%;background:${bg};color:${col};display:inline-flex;align-items:center;justify-content:center;font-size:13px;font-weight:700;flex-shrink:0">${h.waku}</span>
           <div style="flex:1">
             <div style="font-size:15px;font-weight:700">${h.umaban}番 ${h.name || ''}${trendTag}</div>
-            <div style="font-size:11px;color:#6b7280;margin-top:1px">${oddsStr}${fukuStr}</div>
+            <div style="font-size:11px;color:#6b7280;margin-top:1px">${oddsStr}${fukuStr}${jkTag}</div>
           </div>
           <div style="text-align:right;font-size:11px;color:#6b7280">スコア<br><strong style="font-size:15px;color:${rankColors[idx]}">${h.score}</strong></div>
         </div>`;
@@ -898,11 +904,16 @@ async function loadPredict() {
           const bg = WAKU_BG_P[wi]||'#f3f4f6';
           const col= WAKU_COL_P[wi]||'#111';
           const fuku = h.fuku_odds ? `複勝 ${h.fuku_odds}` : '';
+          const jkName = h.jockey || '';
+          const jkRate = h.jockey_rate !== null && h.jockey_rate !== undefined ? h.jockey_rate : null;
+          const jkColor = jkRate >= 35 ? '#16a34a' : jkRate >= 20 ? '#d97706' : '#6b7280';
+          const jkStr = jkName ? ` 🏇${jkName}${jkRate !== null ? `(${jkRate}%)` : ''}` : '';
           return `<div style="display:flex;align-items:center;gap:8px;padding:8px 10px;background:#fff;border-radius:8px;margin-bottom:6px">
             <span style="width:28px;height:28px;border-radius:50%;background:${bg};color:${col};display:inline-flex;align-items:center;justify-content:center;font-size:13px;font-weight:700;flex-shrink:0">${h.waku}</span>
             <div>
               <div style="font-weight:700;font-size:14px">${h.umaban}番 ${h.name||''}</div>
               <div style="font-size:11px;color:#6b7280">${hasOdds ? `単勝${h.tan_odds||'-'}(${h.ninki||'-'}人気) ${fuku}` : `スコア${h.score}`}</div>
+              ${jkName ? `<div style="font-size:11px;color:${jkColor};margin-top:1px">${jkStr}</div>` : ''}
             </div>
             <div style="margin-left:auto;font-size:11px;color:#6b7280">スコア<br><strong>${h.score}</strong></div>
           </div>`;
@@ -913,6 +924,7 @@ async function loadPredict() {
         if (a.waku_rate > 35 || b.waku_rate > 35) reasons.push(`枠の入着率が高い`);
         if (hasOdds && (a.ninki_rate > 40 || b.ninki_rate > 40)) reasons.push(`人気帯の入着率が安定`);
         if (a.umaban_rate > 30 || b.umaban_rate > 30) reasons.push(`馬番の入着率が高い`);
+        if ((a.jockey_rate !== null && a.jockey_rate >= 35) || (b.jockey_rate !== null && b.jockey_rate >= 35)) reasons.push(`騎手の複勝率が高い`);
         const reasonText = reasons.length ? reasons.join('・') : `スコア上位の組み合わせ`;
 
         // 人気合計から期待倍率帯を判定
@@ -1014,9 +1026,11 @@ async function loadPredict() {
     }
 
     // ── 全馬テーブル ───────────────────────────────
+    const hasJockeyData = horses.some(h => h.jockey);
     const oddsHeader = hasOdds
       ? '<th style="padding:8px;text-align:center">単勝</th><th style="padding:8px;text-align:center">複勝</th><th style="padding:8px;text-align:center">人気</th>'
       : '';
+    const jockeyHeader = hasJockeyData ? '<th style="padding:8px;text-align:center">騎手(複勝率)</th>' : '';
     html += `<details style="margin-bottom:16px">
       <summary style="cursor:pointer;font-size:13px;color:#374151;padding:8px 0;font-weight:600">全馬スコア一覧 ▼</summary>
       <div style="overflow-x:auto;margin-top:8px"><table style="width:100%;border-collapse:collapse;font-size:13px">
@@ -1025,6 +1039,7 @@ async function loadPredict() {
         <th style="padding:8px;text-align:center">枠</th>
         <th style="padding:8px;text-align:left">馬名</th>
         ${oddsHeader}
+        ${jockeyHeader}
         <th style="padding:8px;text-align:center">枠%</th>
         <th style="padding:8px;text-align:center">人気%</th>
         <th style="padding:8px;text-align:center">馬番%</th>
@@ -1053,6 +1068,12 @@ async function loadPredict() {
         </td>
         <td style="padding:8px;font-weight:${isTop?'700':'400'}">${h.name || '-'}</td>
         ${oddsCells}
+        ${hasJockeyData ? (() => {
+          const jkName = h.jockey || '-';
+          const jkRate = h.jockey_rate !== null && h.jockey_rate !== undefined ? h.jockey_rate : null;
+          const jkColor = jkRate >= 35 ? '#16a34a' : jkRate >= 20 ? '#d97706' : '#6b7280';
+          return `<td style="padding:8px;text-align:center;font-size:12px;color:${jkColor}">${jkName}${jkRate !== null ? `<br><strong>${jkRate}%</strong>` : ''}</td>`;
+        })() : ''}
         <td style="padding:8px;text-align:center">${h.waku_rate}%</td>
         <td style="padding:8px;text-align:center">${h.ninki_rate}%</td>
         <td style="padding:8px;text-align:center">${h.umaban_rate}%</td>

@@ -163,6 +163,24 @@ def parse_venue_day(html):
             if horse_rows:
                 break
 
+        # raceResultから騎手を取得（着順1-3の騎手名）
+        jockey_map = {}  # pos("1"/"2"/"3") → 騎手名
+        for table in div.find_all("table", class_="raceResult"):
+            for tr in table.find_all("tr"):
+                tds = tr.find_all("td")
+                if len(tds) < 5:
+                    continue
+                chakujun = tds[0].get_text(strip=True).translate(
+                    str.maketrans('０１２３４５６７８９', '0123456789')).strip()
+                m_cj = re.match(r'^(\d+)', chakujun)
+                if not m_cj or m_cj.group(1) not in ("1", "2", "3"):
+                    continue
+                pos = m_cj.group(1)
+                # 騎手は馬名(3)の次(4)列目。数字・記号のみは除外
+                jockey_raw = tds[4].get_text(strip=True)
+                if jockey_raw and not re.match(r'^[\d\s\.\-]+$', jockey_raw):
+                    jockey_map[pos] = jockey_raw
+
         fuku_entries = []
         sanrenpuku_pay = ""
         for table in div.find_all("table", class_="refund"):
@@ -216,6 +234,7 @@ def parse_venue_day(html):
                 entry[f"人気{i}"] = fe["ninki"]
                 entry[f"枠{i}"] = waku_map.get(str(i), "")
                 entry[f"配当{i}"] = fe["pay"]
+                entry[f"騎手{i}"] = jockey_map.get(str(i), "")
             # raceResultの全行数が実際の出走頭数
             entry["頭数"] = total_horses if total_horses > 0 else max(
                 (int(fe["umaban"]) for fe in fuku_entries if fe["umaban"].isdigit()), default=0
@@ -285,13 +304,17 @@ def collect_day(target_date, log):
                 res_path = os.path.join(out_dir, f"{venue_name}_result.csv")
                 with open(res_path, "w", encoding="utf-8", newline="") as f:
                     writer = csv.writer(f)
-                    writer.writerow(["日付", "競馬場", "R", "馬番1", "人気1", "枠1", "馬番2", "人気2", "枠2", "馬番3", "人気3", "枠3", "頭数", "三連複配当"])
+                    writer.writerow(["日付", "競馬場", "R",
+                                     "馬番1", "人気1", "枠1", "騎手1",
+                                     "馬番2", "人気2", "枠2", "騎手2",
+                                     "馬番3", "人気3", "枠3", "騎手3",
+                                     "頭数", "三連複配当"])
                     for r in result["results"]:
                         writer.writerow([
                             target_date, venue_name, r["race_no"],
-                            r.get("馬番1",""), r.get("人気1",""), r.get("枠1",""),
-                            r.get("馬番2",""), r.get("人気2",""), r.get("枠2",""),
-                            r.get("馬番3",""), r.get("人気3",""), r.get("枠3",""),
+                            r.get("馬番1",""), r.get("人気1",""), r.get("枠1",""), r.get("騎手1",""),
+                            r.get("馬番2",""), r.get("人気2",""), r.get("枠2",""), r.get("騎手2",""),
+                            r.get("馬番3",""), r.get("人気3",""), r.get("枠3",""), r.get("騎手3",""),
                             r.get("頭数",""), r.get("sanrenpuku_pay",""),
                         ])
         except Exception as e:
@@ -1545,6 +1568,15 @@ def parse_deba_table(html):
             continue
         seen_umabans.add(umaban_raw)
 
+        # ── 騎手取得 ──────────────────────────────────────────────
+        jockey = ""
+        if len(tds) > umaban_idx + 2:
+            jockey_td = tds[umaban_idx + 2]
+            jockey_raw = jockey_td.get_text(strip=True)
+            # 数字・記号のみ（斤量など）は除外
+            if jockey_raw and not re.match(r'^[\d\s\.\-]+$', jockey_raw):
+                jockey = jockey_raw
+
         # オッズ列 (class=odds_weight)
         odds_td = tr.find("td", class_="odds_weight")
         tan_odds = None
@@ -1566,6 +1598,7 @@ def parse_deba_table(html):
             "umaban": umaban_raw,
             "waku": waku,
             "name": name,
+            "jockey": jockey,
             "tan_odds": tan_odds,
             "fuku_odds": fuku_odds,
             "ninki": 0,
@@ -1580,13 +1613,59 @@ def parse_deba_table(html):
     return sorted(horses, key=lambda x: int(x["umaban"]) if x["umaban"].isdigit() else 99)
 
 
-def calc_prerace_score(horses, venue_name, days=90, min_odds=None, today_trend=None):
+def load_jockey_stats(venue_name, days=90):
+    """_result.csv から騎手別の複勝率（venue_name の過去 days 日）を返す。
+    戻り値: {騎手名: {"count": 出走回数, "place": 3着内回数, "rate": 複勝率%}}
+    """
+    cutoff = (date.today() - timedelta(days=days)).isoformat()
+    jockey_count = defaultdict(int)   # 騎手 → 3着内件数
+    jockey_total = defaultdict(int)   # 騎手 → 総出走件数（= レース数 × 3頭分ではなく1レース1カウント）
+    seen_races = set()  # (日付, R) で重複カウント防止
+
+    for f in sorted(glob.glob(f"{DATA_DIR}/**/{venue_name}_result.csv", recursive=True)):
+        parent = os.path.basename(os.path.dirname(f))
+        if parent < cutoff:
+            continue
+        try:
+            with open(f, encoding="utf-8") as fp:
+                for row in csv.DictReader(fp):
+                    race_key = (row.get("日付",""), row.get("R",""))
+                    if race_key in seen_races:
+                        continue
+                    seen_races.add(race_key)
+                    for i in range(1, 4):
+                        jk = row.get(f"騎手{i}", "").strip()
+                        if jk:
+                            jockey_count[jk] += 1
+        except Exception:
+            pass
+
+    # 総出走件数は別途 _fukusho.csv から取る（騎手は3着以内のみ記録のため）
+    # ここでは「3着以内に登場した回数 / 全3着以内記録数 × 平均出走回数」で近似
+    # より正確には全頭の騎手データが必要だが現時点はこの近似で十分
+    # rate = 3着内回数 / 同期間レース総数（競馬場全体）
+    total_races = len(seen_races)
+
+    stats = {}
+    for jk, place_cnt in jockey_count.items():
+        # 複勝率 = 3着以内に入った回数 / 総レース数
+        # （1レースで最大1回カウント。3着内に同一騎手が複数いるケースは稀なため）
+        rate = round(place_cnt / total_races * 100, 1) if total_races else 0
+        stats[jk] = {"place": place_cnt, "total_races": total_races, "rate": rate}
+    return stats
+
+
+def calc_prerace_score(horses, venue_name, days=90, min_odds=None, today_trend=None,
+                       jockey_stats=None):
     """
     各馬にスコアを付ける。
-    オッズあり: 枠入着率×0.30 + 人気入着率×0.45 + 馬番入着率×0.25
-    オッズなし: 枠入着率×0.45 + 馬番入着率×0.55
+    オッズあり（騎手あり）: 枠×0.25 + 人気×0.35 + 馬番×0.20 + 騎手×0.20
+    オッズあり（騎手なし）: 枠×0.30 + 人気×0.45 + 馬番×0.25
+    オッズなし（騎手あり）: 枠×0.35 + 馬番×0.40 + 騎手×0.25
+    オッズなし（騎手なし）: 枠×0.45 + 馬番×0.55
     today_trend: 当日完了レースの傾向（枠・馬番ホットリスト）。完了数に応じてスコアに加算。
     min_odds: この値未満の単勝オッズの馬は eligible=False とする
+    jockey_stats: load_jockey_stats() の戻り値
     """
     cutoff = (date.today() - timedelta(days=days)).isoformat()
 
@@ -1632,15 +1711,31 @@ def calc_prerace_score(horses, venue_name, days=90, min_odds=None, today_trend=N
     trend_races  = today_trend.get("completed_races", 0) if today_trend else 0
     reliability  = min(trend_races / 5.0, 1.0)  # 0〜1.0（5R完了で100%）
 
+    # 騎手の平均率（補正の基準値）
+    jk_rates = [s["rate"] for s in (jockey_stats or {}).values() if s["place"] >= 3]
+    venue_jk_avg = sum(jk_rates) / len(jk_rates) if jk_rates else 20.0
+
     for h in horses:
         wr = waku_rate.get(h["waku"], 0)
         ur = umaban_rate.get(h["umaban"], 0)
         nr = ninki_rate.get(str(h["ninki"]), 0) if h["ninki"] else 0
+        jk = h.get("jockey", "")
+        jk_stat = (jockey_stats or {}).get(jk, {}) if jk else {}
+        jr = jk_stat.get("rate", venue_jk_avg) if jk_stat.get("place", 0) >= 3 else venue_jk_avg
+
+        has_jockey = bool(jk and jockey_stats and jk in jockey_stats
+                          and jockey_stats[jk].get("place", 0) >= 3)
 
         if has_odds and h["ninki"]:
-            score = wr * 0.30 + nr * 0.45 + ur * 0.25
+            if has_jockey:
+                score = wr * 0.25 + nr * 0.35 + ur * 0.20 + jr * 0.20
+            else:
+                score = wr * 0.30 + nr * 0.45 + ur * 0.25
         else:
-            score = wr * 0.45 + ur * 0.55
+            if has_jockey:
+                score = wr * 0.35 + ur * 0.40 + jr * 0.25
+            else:
+                score = wr * 0.45 + ur * 0.55
 
         # 今日バイアス補正（枠・馬番のホットランクに応じて最大+8点、信頼度で按分）
         waku_bonus   = [4, 2, 1][trend_waku.index(h["waku"])]     if h["waku"]   in trend_waku   else 0
@@ -1653,6 +1748,7 @@ def calc_prerace_score(horses, venue_name, days=90, min_odds=None, today_trend=N
         h["waku_rate"]    = round(wr, 1)
         h["ninki_rate"]   = round(nr, 1)
         h["umaban_rate"]  = round(ur, 1)
+        h["jockey_rate"]  = round(jr, 1) if has_jockey else None
 
         # 最低オッズフィルター: tan_oddsがあり閾値未満ならeligible=False
         if min_odds and h["tan_odds"] is not None:
@@ -1702,7 +1798,9 @@ def api_race_predict():
     try:
         has_odds    = any(h["tan_odds"] is not None for h in horses)
         today_trend = _calc_today_trend(venue)
-        scored      = calc_prerace_score(horses, venue, days=days, min_odds=min_odds, today_trend=today_trend)
+        jockey_stats = load_jockey_stats(venue, days=days)
+        scored      = calc_prerace_score(horses, venue, days=days, min_odds=min_odds,
+                                         today_trend=today_trend, jockey_stats=jockey_stats)
         patterns    = _calc_venue_patterns(venue, days=days)
     except Exception as e:
         import traceback
@@ -1716,6 +1814,7 @@ def api_race_predict():
         "data_days": days,
         "today_trend": today_trend,
         "patterns": patterns,
+        "jockey_stats": jockey_stats,
     })
 
 
