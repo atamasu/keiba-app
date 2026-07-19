@@ -820,11 +820,27 @@ async function loadPredict() {
         const jkTag = jkName
           ? `<span style="font-size:10px;color:${jkColor};margin-left:4px">🏇${jkName}${jkRate !== null ? `(${jkRate}%)` : ''}</span>`
           : '';
+        // 前走着順バッジ
+        const lastForm = (h.recent_form && h.recent_form.length > 0) ? h.recent_form[0] : null;
+        let formTag = '';
+        if (lastForm && lastForm.rank) {
+          const r = lastForm.rank;
+          const fBg = r <= 3 ? '#dcfce7' : r <= 5 ? '#fef9c3' : '#fee2e2';
+          const fCol = r <= 3 ? '#166534' : r <= 5 ? '#92400e' : '#991b1b';
+          formTag = `<span style="font-size:10px;background:${fBg};color:${fCol};border-radius:4px;padding:1px 5px;margin-left:4px">前走${r}着</span>`;
+        }
+        // 距離適性バッジ
+        let distTag = '';
+        if (h.dist_score !== null && h.dist_score !== undefined) {
+          const ds = h.dist_score;
+          if (ds >= 60) distTag = `<span style="font-size:10px;background:#dbeafe;color:#1e40af;border-radius:4px;padding:1px 5px;margin-left:4px">距離◎</span>`;
+          else if (ds >= 40) distTag = `<span style="font-size:10px;background:#f1f5f9;color:#475569;border-radius:4px;padding:1px 5px;margin-left:4px">距離△</span>`;
+        }
         return `<div style="display:flex;align-items:center;gap:10px;padding:8px 10px;background:${rankBg[idx]};border:1px solid ${rankBorder[idx]};border-radius:10px;margin-bottom:6px">
           <div style="font-size:11px;font-weight:700;color:${rankColors[idx]};min-width:24px;text-align:center">${rankLabels[idx]}</div>
           <span style="width:30px;height:30px;border-radius:50%;background:${bg};color:${col};display:inline-flex;align-items:center;justify-content:center;font-size:13px;font-weight:700;flex-shrink:0">${h.waku}</span>
           <div style="flex:1">
-            <div style="font-size:15px;font-weight:700">${h.umaban}番 ${h.name || ''}${trendTag}</div>
+            <div style="font-size:15px;font-weight:700">${h.umaban}番 ${h.name || ''}${trendTag}${formTag}${distTag}</div>
             <div style="font-size:11px;color:#6b7280;margin-top:1px">${oddsStr}${fukuStr}${jkTag}</div>
           </div>
           <div style="text-align:right;font-size:11px;color:#6b7280">スコア<br><strong style="font-size:15px;color:${rankColors[idx]}">${h.score}</strong></div>
@@ -917,10 +933,18 @@ async function loadPredict() {
           const jkRate = h.jockey_rate !== null && h.jockey_rate !== undefined ? h.jockey_rate : null;
           const jkColor = jkRate >= 35 ? '#16a34a' : jkRate >= 20 ? '#d97706' : '#6b7280';
           const jkStr = jkName ? ` 🏇${jkName}${jkRate !== null ? `(${jkRate}%)` : ''}` : '';
+          const hLastForm = (h.recent_form && h.recent_form.length > 0) ? h.recent_form[0] : null;
+          let hFormTag = '';
+          if (hLastForm && hLastForm.rank) {
+            const r = hLastForm.rank;
+            const fBg = r <= 3 ? '#dcfce7' : r <= 5 ? '#fef9c3' : '#fee2e2';
+            const fCol = r <= 3 ? '#166534' : r <= 5 ? '#92400e' : '#991b1b';
+            hFormTag = `<span style="font-size:10px;background:${fBg};color:${fCol};border-radius:4px;padding:1px 4px;margin-left:3px">前走${r}着</span>`;
+          }
           return `<div style="display:flex;align-items:center;gap:8px;padding:8px 10px;background:#fff;border-radius:8px;margin-bottom:6px">
             <span style="width:28px;height:28px;border-radius:50%;background:${bg};color:${col};display:inline-flex;align-items:center;justify-content:center;font-size:13px;font-weight:700;flex-shrink:0">${h.waku}</span>
             <div>
-              <div style="font-weight:700;font-size:14px">${h.umaban}番 ${h.name||''}</div>
+              <div style="font-weight:700;font-size:14px">${h.umaban}番 ${h.name||''}${hFormTag}</div>
               <div style="font-size:11px;color:#6b7280">${hasOdds ? `単勝${h.tan_odds||'-'}(${h.ninki||'-'}人気) ${fuku}` : `スコア${h.score}`}</div>
               ${jkName ? `<div style="font-size:11px;color:${jkColor};margin-top:1px">${jkStr}</div>` : ''}
             </div>

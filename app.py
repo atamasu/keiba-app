@@ -1,7 +1,8 @@
 from flask import Flask, render_template, jsonify, request
-import csv, glob, os, re, threading
+import csv, glob, os, re, threading, time
 from datetime import date, timedelta
 from collections import defaultdict
+from concurrent.futures import ThreadPoolExecutor, as_completed
 import urllib.request
 from bs4 import BeautifulSoup
 
@@ -21,6 +22,10 @@ VENUE_CODES = {
 BABA_MAP = {"良": "良", "稍重": "稍重", "重": "重", "不良": "不良"}
 
 collect_status = {}  # {date: {"status": "running"|"done"|"error", "log": [...]}}
+
+_horse_form_cache = {}   # horse_code → (cached_at_float, [races])
+_horse_form_lock  = threading.Lock()
+_HORSE_FORM_TTL   = 1800  # 30分キャッシュ
 
 
 # ── データ読み込み・集計 ──────────────────────────────
@@ -1457,34 +1462,45 @@ def api_recent():
 
 def fetch_race_entries(venue_name, race_no):
     """keiba.go.jp の DebaTable から馬番・枠番・馬名・単勝・複勝オッズを取得"""
-    horses, _ = fetch_race_entries_debug(venue_name, race_no)
+    horses, _, _d = fetch_race_entries_debug(venue_name, race_no)
     return horses
 
 
 def fetch_race_entries_debug(venue_name, race_no):
-    """fetch_race_entriesのデバッグ情報付き版。(horses, debug_code) を返す。"""
+    """fetch_race_entriesのデバッグ情報付き版。(horses, debug_code, today_dist) を返す。"""
     code = VENUE_CODES.get(venue_name)
     if not code:
-        return [], "no_venue_code"
+        return [], "no_venue_code", None
     today = date.today().isoformat()
     date_fmt = today.replace("-", "%2F")
     url = f"https://www.keiba.go.jp/KeibaWeb/TodayRaceInfo/DebaTable?k_raceDate={date_fmt}&k_raceNo={race_no}&k_babaCode={code}"
     try:
         html = fetch_html(url, timeout=10)
     except Exception:
-        return [], "fetch_error"
+        return [], "fetch_error", None
     # テーブルの有無を先に確認
     soup_check = BeautifulSoup(html, "html.parser")
     tbl = soup_check.find("table")
     if not tbl:
-        return [], "no_table"
+        return [], "no_table", None
     trs = tbl.find_all("tr")
     if len(trs) <= 1:
-        return [], "empty_table"
+        return [], "empty_table", None
+    # 今日のレース距離をページ全体から抽出（例: "ダ1000m" "芝1400m"）
+    today_dist = None
+    page_text = soup_check.get_text(" ")
+    m_dist = re.search(r'[ダ芝]\s*(\d{3,4})\s*m', page_text)
+    if not m_dist:
+        m_dist = re.search(r'(\d{3,4})\s*m', page_text)
+    if m_dist:
+        try:
+            today_dist = int(m_dist.group(1))
+        except Exception:
+            pass
     horses = parse_deba_table(html)
     if not horses:
-        return [], "all_filtered"
-    return horses, "ok"
+        return [], "all_filtered", today_dist
+    return horses, "ok", today_dist
 
 
 def parse_deba_table(html):
@@ -1557,12 +1573,20 @@ def parse_deba_table(html):
         if not (1 <= umaban_int <= 99):
             continue
 
-        # ── 馬名取得 ──────────────────────────────────────────────
+        # ── 馬名・馬コード取得 ────────────────────────────────────
         name = ""
+        horse_code = ""
         if len(tds) > umaban_idx + 1:
             name_td = tds[umaban_idx + 1]
             # <br>より前のテキストノードのみ取得
             name = next((s.strip() for s in name_td.strings if s.strip()), "")
+            # 馬コードをリンクから取得
+            name_link = name_td.find("a")
+            if name_link:
+                href = name_link.get("href", "")
+                m_code = re.search(r'k_horseCd=(\d+)', href)
+                if m_code:
+                    horse_code = m_code.group(1)
 
         # 馬名バリデーション（数字・記号・空のみは統計行とみなす）
         # 日本語必須は廃止し、2文字以上かつ数字のみでないことを確認
@@ -1604,6 +1628,7 @@ def parse_deba_table(html):
             "umaban": umaban_raw,
             "waku": waku,
             "name": name,
+            "horse_code": horse_code,
             "jockey": jockey,
             "tan_odds": tan_odds,
             "fuku_odds": fuku_odds,
@@ -1661,17 +1686,165 @@ def load_jockey_stats(venue_name, days=90):
     return stats
 
 
+# ── 前走着順・距離適性 ──────────────────────────────────
+
+def _parse_horse_mark_table(html):
+    """HorseMarkTable HTMLから近走成績を抽出。
+    Returns: [{"rank": int, "distance": int|None, "date": str}, ...]  最大5件・新着順
+    """
+    soup = BeautifulSoup(html, "html.parser")
+    _z2h = str.maketrans('０１２３４５６７８９', '0123456789')
+    races = []
+
+    for table in soup.find_all("table"):
+        headers = []
+        header_row = table.find("tr")
+        if header_row:
+            ths = header_row.find_all(["th", "td"])
+            headers = [th.get_text(strip=True).translate(_z2h) for th in ths]
+
+        # 着順・距離列インデックスを探す
+        rank_idx = dist_idx = date_idx = None
+        for i, h in enumerate(headers):
+            if "着順" in h or h == "着":
+                rank_idx = i
+            if "距離" in h or "コース" in h:
+                dist_idx = i
+            if "日付" in h or "年月日" in h:
+                date_idx = i
+
+        for tr in table.find_all("tr")[1:]:
+            tds = tr.find_all("td")
+            if not tds:
+                continue
+
+            rank = None
+            if rank_idx is not None and rank_idx < len(tds):
+                r_raw = tds[rank_idx].get_text(strip=True).translate(_z2h)
+                m_r = re.match(r'^(\d{1,2})$', r_raw)
+                if m_r:
+                    rank = int(m_r.group(1))
+            # fallback: 行内で 1〜18 の単独数字セルを探す
+            if rank is None:
+                for td in tds:
+                    t = td.get_text(strip=True).translate(_z2h)
+                    if re.match(r'^(1[0-8]|[1-9])$', t):
+                        rank = int(t)
+                        break
+
+            if rank is None:
+                continue
+
+            dist = None
+            if dist_idx is not None and dist_idx < len(tds):
+                d_raw = tds[dist_idx].get_text(strip=True).translate(_z2h)
+                m_d = re.search(r'(\d{3,4})', d_raw)
+                if m_d:
+                    dist = int(m_d.group(1))
+
+            date_str = ""
+            if date_idx is not None and date_idx < len(tds):
+                date_str = tds[date_idx].get_text(strip=True)
+
+            races.append({"rank": rank, "distance": dist, "date": date_str})
+            if len(races) >= 5:
+                break
+        if races:
+            break
+
+    return races
+
+
+def fetch_horse_form(horse_code):
+    """馬の近走成績を返す（メモリキャッシュ付き、30分TTL）。
+    Returns: [{"rank": int, "distance": int|None, "date": str}, ...]
+    """
+    if not horse_code:
+        return []
+    now = time.time()
+    with _horse_form_lock:
+        if horse_code in _horse_form_cache:
+            cached_at, data = _horse_form_cache[horse_code]
+            if now - cached_at < _HORSE_FORM_TTL:
+                return data
+    url = (f"https://www.keiba.go.jp/KeibaWeb/DataRoom/"
+           f"HorseMarkTable?k_horseCd={horse_code}")
+    try:
+        html = fetch_html(url, timeout=8)
+        data = _parse_horse_mark_table(html)
+    except Exception:
+        data = []
+    with _horse_form_lock:
+        _horse_form_cache[horse_code] = (now, data)
+    return data
+
+
+def fetch_all_horse_forms(horses):
+    """全馬の近走成績を並列取得してhorse辞書に "recent_form" を追加する。"""
+    codes = [(i, h.get("horse_code", "")) for i, h in enumerate(horses)]
+    codes_with_code = [(i, c) for i, c in codes if c]
+    if not codes_with_code:
+        return
+
+    def _fetch(idx_code):
+        idx, code = idx_code
+        return idx, fetch_horse_form(code)
+
+    with ThreadPoolExecutor(max_workers=5) as ex:
+        futures = {ex.submit(_fetch, ic): ic for ic in codes_with_code}
+        for fut in as_completed(futures, timeout=15):
+            try:
+                idx, form = fut.result()
+                horses[idx]["recent_form"] = form
+            except Exception:
+                pass
+
+
+def _calc_form_score(recent_form, today_dist=None):
+    """前走着順と距離適性から (form_r, dist_r) を 0〜100 スケールで返す。
+    データなし → (40, 40)
+    """
+    _RANK_SCORE = {1: 95, 2: 75, 3: 55, 4: 38, 5: 30}
+
+    if not recent_form:
+        return 40, 40
+
+    # 前走着順スコア（直近1走）
+    last = recent_form[0]
+    rank = last.get("rank")
+    if rank and rank <= 5:
+        form_r = _RANK_SCORE.get(rank, 20)
+    elif rank:
+        form_r = max(10, 28 - rank)  # 6着→22, 10着→18, ...
+    else:
+        form_r = 40
+
+    # 距離適性スコア（過去5走中、今日の距離±200m内の3着内率）
+    dist_r = 40
+    if today_dist:
+        dist_races = [r for r in recent_form
+                      if r.get("distance") and abs(r["distance"] - today_dist) <= 200]
+        if dist_races:
+            hits = sum(1 for r in dist_races if r.get("rank") and r["rank"] <= 3)
+            dist_r = round(hits / len(dist_races) * 100)
+
+    return form_r, dist_r
+
+
 def calc_prerace_score(horses, venue_name, days=90, min_odds=None, today_trend=None,
-                       jockey_stats=None):
+                       jockey_stats=None, today_dist=None):
     """
     各馬にスコアを付ける。
-    オッズあり（騎手あり）: 枠×0.25 + 人気×0.35 + 馬番×0.20 + 騎手×0.20
-    オッズあり（騎手なし）: 枠×0.30 + 人気×0.45 + 馬番×0.25
-    オッズなし（騎手あり）: 枠×0.35 + 馬番×0.40 + 騎手×0.25
-    オッズなし（騎手なし）: 枠×0.45 + 馬番×0.55
+    フォームあり+騎手あり: 枠×0.18+人気×0.25+馬番×0.15+騎手×0.15+前走×0.15+距離×0.12
+    フォームあり+騎手なし: 枠×0.22+人気×0.33+馬番×0.18+前走×0.15+距離×0.12
+    フォームなし+騎手あり: 枠×0.25+人気×0.35+馬番×0.20+騎手×0.20  (従来)
+    フォームなし+騎手なし: 枠×0.30+人気×0.45+馬番×0.25             (従来)
+    オッズなし+フォームあり: 枠×0.30+馬番×0.35+前走×0.20+距離×0.15
+    オッズなし+フォームなし: 枠×0.45+馬番×0.55                      (従来)
     today_trend: 当日完了レースの傾向（枠・馬番ホットリスト）。完了数に応じてスコアに加算。
     min_odds: この値未満の単勝オッズの馬は eligible=False とする
     jockey_stats: load_jockey_stats() の戻り値
+    today_dist: 今日のレース距離(m)
     """
     cutoff = (date.today() - timedelta(days=days)).isoformat()
 
@@ -1732,16 +1905,29 @@ def calc_prerace_score(horses, venue_name, days=90, min_odds=None, today_trend=N
         has_jockey = bool(jk and jockey_stats and jk in jockey_stats
                           and jockey_stats[jk].get("place", 0) >= 3)
 
+        # 前走・距離スコア
+        recent_form = h.get("recent_form")
+        has_form = bool(recent_form)
+        form_r, dist_r = _calc_form_score(recent_form, today_dist)
+
         if has_odds and h["ninki"]:
-            if has_jockey:
-                score = wr * 0.25 + nr * 0.35 + ur * 0.20 + jr * 0.20
+            if has_form and has_jockey:
+                score = wr*0.18 + nr*0.25 + ur*0.15 + jr*0.15 + form_r*0.15 + dist_r*0.12
+            elif has_form:
+                score = wr*0.22 + nr*0.33 + ur*0.18 + form_r*0.15 + dist_r*0.12
+            elif has_jockey:
+                score = wr*0.25 + nr*0.35 + ur*0.20 + jr*0.20
             else:
-                score = wr * 0.30 + nr * 0.45 + ur * 0.25
+                score = wr*0.30 + nr*0.45 + ur*0.25
         else:
-            if has_jockey:
-                score = wr * 0.35 + ur * 0.40 + jr * 0.25
+            if has_form and has_jockey:
+                score = wr*0.28 + ur*0.30 + jr*0.12 + form_r*0.18 + dist_r*0.12
+            elif has_form:
+                score = wr*0.30 + ur*0.35 + form_r*0.20 + dist_r*0.15
+            elif has_jockey:
+                score = wr*0.35 + ur*0.40 + jr*0.25
             else:
-                score = wr * 0.45 + ur * 0.55
+                score = wr*0.45 + ur*0.55
 
         # 今日バイアス補正（枠・馬番のホットランクに応じて最大+8点、信頼度で按分）
         waku_bonus   = [4, 2, 1][trend_waku.index(h["waku"])]     if h["waku"]   in trend_waku   else 0
@@ -1755,6 +1941,8 @@ def calc_prerace_score(horses, venue_name, days=90, min_odds=None, today_trend=N
         h["ninki_rate"]   = round(nr, 1)
         h["umaban_rate"]  = round(ur, 1)
         h["jockey_rate"]  = round(jr, 1) if has_jockey else None
+        h["form_score"]   = round(form_r, 1) if has_form else None
+        h["dist_score"]   = round(dist_r, 1) if has_form else None
 
         # 最低オッズフィルター: tan_oddsがあり閾値未満ならeligible=False
         if min_odds and h["tan_odds"] is not None:
@@ -1785,7 +1973,7 @@ def api_race_predict():
         return jsonify({"error": "競馬場名が不正です"}), 400
 
     try:
-        horses, parse_debug = fetch_race_entries_debug(venue, race_no)
+        horses, parse_debug, today_dist = fetch_race_entries_debug(venue, race_no)
     except Exception as e:
         import traceback
         return jsonify({"error": f"出走表取得エラー: {e}", "horses": [], "debug": traceback.format_exc()}), 200
@@ -1805,8 +1993,11 @@ def api_race_predict():
         has_odds    = any(h["tan_odds"] is not None for h in horses)
         today_trend = _calc_today_trend(venue)
         jockey_stats = load_jockey_stats(venue, days=days)
+        # 前走・距離適性を並列取得
+        fetch_all_horse_forms(horses)
         scored      = calc_prerace_score(horses, venue, days=days, min_odds=min_odds,
-                                         today_trend=today_trend, jockey_stats=jockey_stats)
+                                         today_trend=today_trend, jockey_stats=jockey_stats,
+                                         today_dist=today_dist)
         patterns    = _calc_venue_patterns(venue, days=days)
     except Exception as e:
         import traceback
@@ -1819,6 +2010,7 @@ def api_race_predict():
         "has_odds": has_odds,
         "data_days": days,
         "today_trend": today_trend,
+        "today_dist": today_dist,
         "patterns": patterns,
         "jockey_stats": jockey_stats,
     })
